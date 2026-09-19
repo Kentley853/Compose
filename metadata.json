@@ -1,0 +1,8 @@
+{
+  "name": "Remix Compose AI",
+  "description": "AI-assisted architectural concept platform connecting site intelligence, architectural reasoning, conceptual floor planning, coordinated 2D/3D visualization, preliminary compliance, and BOQ estimation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
