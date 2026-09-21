@@ -114,8 +114,8 @@ export const BOQScreen: React.FC = () => {
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Preliminary Cost & BOQ</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Preliminary Cost & BOQ</h1>
               <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 {currentLocData.label}
               </span>
@@ -149,7 +149,7 @@ export const BOQScreen: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Conservative Low Range</div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">{formatUSD(lowEstimate)}</div>
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">{formatUSD(lowEstimate)}</div>
             <div className="text-[11px] text-[#667085] mt-1">-8% trade efficiency benchmark</div>
           </div>
 
@@ -160,19 +160,19 @@ export const BOQScreen: React.FC = () => {
                 TARGET
               </span>
             </div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">{formatUSD(midEstimate)}</div>
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">{formatUSD(midEstimate)}</div>
             <div className="text-[11px] text-[#667085] mt-1">{currentLocData.label}</div>
           </div>
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Upper Buffer Range</div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">{formatUSD(highEstimate)}</div>
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">{formatUSD(highEstimate)}</div>
             <div className="text-[11px] text-[#667085] mt-1">+15% material escalation reserve</div>
           </div>
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Estimated Cost / Sq Ft</div>
-            <div className="text-2xl font-bold text-[#027A48] mt-1 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#027A48] mt-1 font-mono">
               ${costPerSqFt}/sq ft
             </div>
             <div className="text-[11px] text-[#667085] mt-1">Based on {grossAreaSF.toLocaleString()} sq ft GFA</div>
@@ -275,8 +275,8 @@ export const BOQScreen: React.FC = () => {
 
         {/* BOQ Schedule Table */}
         <div className="bg-white border border-[#E4E7EC] rounded-xl overflow-hidden shadow-xs">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+          <div className="overflow-x-auto overscroll-x-contain">
+            <table className="w-full min-w-[48rem] text-left text-xs">
               <thead className="bg-[#F9FAFB] text-[#667085] text-[11px] uppercase font-semibold border-b border-[#E4E7EC]">
                 <tr>
                   <th className="py-3 px-4">Trade & Item Description</th>

@@ -2,7 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the app paint under iOS notches / Android cutouts,
+         while the CSS safe-area utilities keep content clear of them. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, minimum-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#2563EB" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- iOS standalone / home-screen behaviour -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Compose AI" />
+    <meta name="application-name" content="Compose AI" />
+
     <title>Compose AI — Conceptual Architectural Intelligence</title>
     <meta name="description" content="AI-assisted architectural concept platform connecting site intelligence, architectural reasoning, conceptual floor planning, coordinated 2D/3D visualization, preliminary compliance, and BOQ estimation." />
     <meta property="og:title" content="Compose AI — Conceptual Architectural Intelligence" />
@@ -18,4 +34,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

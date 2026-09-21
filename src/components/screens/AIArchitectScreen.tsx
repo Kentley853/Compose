@@ -123,8 +123,8 @@ To finalize the architectural brief and spatial zoning, please review the 4 stra
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">AI Architect Dialogue</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">AI Architect Dialogue</h1>
               <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 Gemini 3.8 Flash • Program Briefing
               </span>
@@ -308,8 +308,8 @@ To finalize the architectural brief and spatial zoning, please review the 4 stra
                   </span>
                 </div>
 
-                <div className="max-h-[220px] overflow-y-auto border border-[#E4E7EC] rounded-lg bg-white">
-                  <table className="w-full text-left text-xs">
+                <div className="max-h-[220px] overflow-auto overscroll-contain border border-[#E4E7EC] rounded-lg bg-white">
+                  <table className="w-full min-w-[26rem] text-left text-xs">
                     <thead className="bg-[#F9FAFB] text-[#667085] text-[11px] uppercase font-semibold sticky top-0 border-b border-[#E4E7EC]">
                       <tr>
                         <th className="py-2 px-3">Room / Space</th>

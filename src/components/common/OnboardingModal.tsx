@@ -100,8 +100,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-white border border-[#E4E7EC] rounded-xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-white border border-[#E4E7EC] rounded-t-2xl sm:rounded-xl shadow-2xl w-full max-w-xl max-h-[92dvh] sm:max-h-[85dvh] overflow-hidden flex flex-col pb-safe animate-in slide-sheet sm:zoom-in-95">
         {/* Header */}
         <div className="px-6 pt-5 pb-4 border-b border-[#E4E7EC] flex items-center justify-between">
           <div className="flex items-center gap-2">

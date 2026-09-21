@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useProject } from '../../context/ProjectContext';
 import { RoomData, PlanAlternative } from '../../types/architecture';
 import {
@@ -62,6 +63,10 @@ export const FloorPlanScreen: React.FC = () => {
   const canvasSvgRef = useRef<SVGSVGElement>(null);
 
   // Layout & Panel states
+  // Below `lg` there is no room for a canvas *and* a 320px side panel, so the
+  // inspector becomes a bottom sheet over the drawing instead of a column.
+  const isCompact = useMediaQuery('(max-width: 1023px)');
+
   const [leftRailOpen, setLeftRailOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [inspectorWidth, setInspectorWidth] = useState(320); // 300 - 340px resizable
@@ -123,7 +128,10 @@ export const FloorPlanScreen: React.FC = () => {
   // Fit Plan to Viewport calculation
   const fitPlan = useCallback(() => {
     if (viewportSize.width <= 0 || viewportSize.height <= 0) return;
-    const fit = calculateFitViewport(planBounds, viewportSize, 0.10);
+    // Dimension strings and leaders are drawn outside the plan bounds, so a
+    // narrow viewport needs proportionally more padding to keep them on screen.
+    const padding = viewportSize.width < 640 ? 0.18 : 0.1;
+    const fit = calculateFitViewport(planBounds, viewportSize, padding);
     setScale(fit.scale);
     setPanX(fit.offsetX);
     setPanY(fit.offsetY);
@@ -153,6 +161,12 @@ export const FloorPlanScreen: React.FC = () => {
   useEffect(() => {
     fitPlan();
   }, [project.activeAlternativeId, fitPlan]);
+
+  // Entering compact mode hands the full width back to the drawing; the
+  // inspector is one tap away in the toolbar when it is actually needed.
+  useEffect(() => {
+    setInspectorOpen(!isCompact);
+  }, [isCompact]);
 
   // ResizeObserver on canvas container
   useEffect(() => {
@@ -230,11 +244,40 @@ export const FloorPlanScreen: React.FC = () => {
     setPanY(newPanY);
   };
 
-  // Pan interaction
+  // Pan / pinch interaction.
+  // Pointer events cover mouse, touch and pen with a single code path, so the
+  // canvas behaves the same on a desktop trackpad and on a phone.
   const isPanningRef = useRef(false);
   const startPanPosRef = useRef({ x: 0, y: 0 });
+  const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist: number; scale: number; midX: number; midY: number } | null>(null);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  /** Distance and midpoint of the first two active pointers. */
+  const readPinch = () => {
+    const pts = [...activePointersRef.current.values()];
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    return {
+      dist: Math.hypot(a.x - b.x, a.y - b.y),
+      midX: (a.x + b.x) / 2,
+      midY: (a.y + b.y) / 2,
+    };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+
+    // Two fingers down: start a pinch-zoom and abandon any single-finger pan.
+    if (activePointersRef.current.size === 2) {
+      const pinch = readPinch();
+      if (pinch) {
+        isPanningRef.current = false;
+        pinchRef.current = { dist: pinch.dist, scale, midX: pinch.midX, midY: pinch.midY };
+      }
+      return;
+    }
+
     const isMiddleClick = e.button === 1;
     const isSpacePan = activeTool === 'pan' || e.shiftKey;
 
@@ -264,8 +307,30 @@ export const FloorPlanScreen: React.FC = () => {
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
     const rect = containerRef.current?.getBoundingClientRect();
+
+    // Pinch-zoom: keep the point between the fingers anchored while scaling.
+    if (pinchRef.current && rect) {
+      const pinch = readPinch();
+      if (pinch && pinch.dist > 0) {
+        const start = pinchRef.current;
+        const newScale = Math.max(4, Math.min(60, start.scale * (pinch.dist / start.dist)));
+        const midX = pinch.midX - rect.left;
+        const midY = pinch.midY - rect.top;
+        const worldX = (midX - panX) / scale;
+        const worldY = (midY - panY) / scale;
+        setScale(newScale);
+        setPanX(midX - worldX * newScale);
+        setPanY(midY - worldY * newScale);
+      }
+      return;
+    }
+
     if (rect) {
       const xPix = e.clientX - rect.left;
       const yPix = e.clientY - rect.top;
@@ -284,8 +349,11 @@ export const FloorPlanScreen: React.FC = () => {
     }
   };
 
-  const handleMouseUp = () => {
-    isPanningRef.current = false;
+  const handlePointerUp = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (activePointersRef.current.size < 2) pinchRef.current = null;
+    if (activePointersRef.current.size === 0) isPanningRef.current = false;
   };
 
   // Resizing inspector panel
@@ -426,6 +494,11 @@ export const FloorPlanScreen: React.FC = () => {
 
   const presetStyle = getPresetStyles(displayPreset);
 
+  // Sheet furniture (title block, scale bar, legend) is drawn at a fixed pixel
+  // size, so on a small canvas it would cover the plan rather than annotate it.
+  const canShowTitleBlock = viewportSize.width >= 560 && viewportSize.height >= 320;
+  const canShowScaleBar = viewportSize.width >= 380 && viewportSize.height >= 260;
+
   // Zone colors for presentation mode
   const getZoneFill = (zone: RoomData['zone'], isSelected: boolean, isHovered: boolean) => {
     if (isSelected) return presetStyle.selectedFill;
@@ -478,9 +551,11 @@ export const FloorPlanScreen: React.FC = () => {
   return (
     <div className="flex flex-col h-full bg-[#F7F8FA] overflow-hidden select-none">
       {/* 1. Compact Architectural Top Toolbar (48–56px) */}
-      <header className="h-12 sm:h-13 bg-white border-b border-[#E4E7EC] px-3 sm:px-4 flex items-center justify-between gap-3 shrink-0 z-20">
-        {/* Left: Floor Switcher (Ground Floor, Second Floor, All Floors Overlay) */}
-        <div className="flex items-center gap-2 sm:gap-3">
+      <header className="h-12 sm:h-13 bg-white border-b border-[#E4E7EC] pl-2 pr-2 sm:px-4 flex items-center gap-2 sm:gap-3 shrink-0 z-20">
+        {/* Left + centre groups share one scroller so nothing is unreachable
+            on a phone; the action cluster on the right stays pinned. */}
+        <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="flex items-center bg-[#F2F4F7] p-1 rounded-lg">
             <button
               id="btn-floor-ground"
@@ -495,9 +570,10 @@ export const FloorPlanScreen: React.FC = () => {
               }`}
               title="Switch to Ground Floor (Key: 1)"
             >
-              <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
-              <span>Ground Floor</span>
-              <span className="hidden md:inline text-[10px] text-[#667085] font-mono">
+              <span className="w-2 h-2 shrink-0 rounded-full bg-[#2563EB]" />
+              <span className="hidden xs:inline">Ground Floor</span>
+              <span className="xs:hidden">GF</span>
+              <span className="hidden xl:inline text-[10px] text-[#667085] font-mono">
                 ({groundRooms.length} rms • {Math.round(groundRooms.reduce((a, r) => a + (r.area || r.width * r.height), 0))} SF)
               </span>
             </button>
@@ -515,9 +591,10 @@ export const FloorPlanScreen: React.FC = () => {
               }`}
               title="Switch to Second Floor (Key: 2)"
             >
-              <span className="w-2 h-2 rounded-full bg-[#7C3AED]" />
-              <span>Second Floor</span>
-              <span className="hidden md:inline text-[10px] text-[#667085] font-mono">
+              <span className="w-2 h-2 shrink-0 rounded-full bg-[#7C3AED]" />
+              <span className="hidden xs:inline">Second Floor</span>
+              <span className="xs:hidden">L2</span>
+              <span className="hidden xl:inline text-[10px] text-[#667085] font-mono">
                 ({upperRooms.length} rms • {Math.round(upperRooms.reduce((a, r) => a + (r.area || r.width * r.height), 0))} SF)
               </span>
             </button>
@@ -532,20 +609,25 @@ export const FloorPlanScreen: React.FC = () => {
               }`}
               title="Toggle All Floors Overlay (Key: 0)"
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>All Floors Overlay</span>
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">All Floors Overlay</span>
+              <span className="sm:hidden">Overlay</span>
             </button>
           </div>
         </div>
 
-        {/* Center: Compact Scheme Selector */}
-        <div className="relative">
+        </div>
+
+        {/* Scheme Selector — outside the scroller so its dropdown is not clipped */}
+        <div className="relative shrink-0">
           <button
             onClick={() => setSchemeDropdownOpen(!schemeDropdownOpen)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#E4E7EC] hover:bg-[#F9FAFB] text-xs font-semibold text-[#172033] transition-colors"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg border border-[#E4E7EC] hover:bg-[#F9FAFB] text-xs font-semibold text-[#172033] transition-colors whitespace-nowrap"
           >
-            <span className="text-[#667085]">Scheme:</span>
-            <span className="text-[#2563EB] font-bold">{currentAlternative.name}</span>
+            <span className="text-[#667085] hidden sm:inline">Scheme:</span>
+            <span className="text-[#2563EB] font-bold truncate max-w-[6rem] sm:max-w-[10rem] xl:max-w-[16rem]">
+              {currentAlternative.name}
+            </span>
             <span className="text-[#667085] text-[11px] font-mono hidden sm:inline">
               ({currentAlternative.grossArea} m²)
             </span>
@@ -553,7 +635,7 @@ export const FloorPlanScreen: React.FC = () => {
           </button>
 
           {schemeDropdownOpen && (
-            <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 bg-white rounded-xl shadow-xl border border-[#E4E7EC] p-2 z-50 animate-in fade-in zoom-in-95">
+            <div className="absolute top-full mt-1.5 right-0 lg:left-1/2 lg:right-auto lg:-translate-x-1/2 w-[min(18rem,calc(100vw-2rem))] max-h-[60vh] overflow-y-auto overscroll-contain bg-white rounded-xl shadow-xl border border-[#E4E7EC] p-2 z-50 animate-in fade-in zoom-in-95">
               <div className="text-[10px] font-bold uppercase tracking-wider text-[#667085] px-2 py-1">
                 Select Design Scheme
               </div>
@@ -584,12 +666,12 @@ export const FloorPlanScreen: React.FC = () => {
         </div>
 
         {/* Right: Display Preset, 3D Quick-link, Fullscreen, Inspector Toggle */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Preset Selector */}
           <select
             value={displayPreset}
             onChange={(e) => setDisplayPreset(e.target.value as DisplayPreset)}
-            className="text-xs bg-[#F9FAFB] border border-[#E4E7EC] rounded-lg px-2.5 py-1.5 font-medium text-[#344054] focus:outline-hidden focus:ring-1 focus:ring-[#2563EB] cursor-pointer"
+            className="hidden sm:block max-w-[9rem] md:max-w-none text-xs bg-[#F9FAFB] border border-[#E4E7EC] rounded-lg px-2.5 py-1.5 font-medium text-[#344054] focus:outline-hidden focus:ring-1 focus:ring-[#2563EB] cursor-pointer"
             title="Display Style Preset"
           >
             <option value="architectural">Style: Architectural</option>
@@ -633,17 +715,22 @@ export const FloorPlanScreen: React.FC = () => {
 
       {/* 2. Main Workspace Body: Left Tool Rail + Dominant Central Canvas + Right Inspector */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Tool Rail: 56–64px */}
+        {/* Tool Rail — a 56px column on desktop, a floating pill above the
+            canvas on compact screens so the drawing keeps the full width. */}
         <div
-          className={`bg-white border-r border-[#E4E7EC] flex flex-col items-center py-3 gap-2 shrink-0 z-10 transition-all ${
-            leftRailOpen ? 'w-14' : 'w-0 overflow-hidden'
-          }`}
+          className={
+            isCompact
+              ? 'absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-row items-center gap-1 px-2 py-1.5 rounded-2xl glass border border-[#E4E7EC] shadow-lg max-w-[calc(100%-1.5rem)] overflow-x-auto no-scrollbar'
+              : `bg-white border-r border-[#E4E7EC] flex flex-col items-center py-3 gap-2 shrink-0 z-10 transition-all ${
+                  leftRailOpen ? 'w-14' : 'w-0 overflow-hidden'
+                }`
+          }
         >
           {/* Select Tool (V) */}
           <button
             id="tool-select"
             onClick={() => setActiveTool('select')}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+            className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
               activeTool === 'select'
                 ? 'bg-[#EEF4FF] text-[#2563EB] shadow-xs'
                 : 'text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB]'
@@ -657,7 +744,7 @@ export const FloorPlanScreen: React.FC = () => {
           <button
             id="tool-pan"
             onClick={() => setActiveTool('pan')}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+            className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
               activeTool === 'pan'
                 ? 'bg-[#EEF4FF] text-[#2563EB] shadow-xs'
                 : 'text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB]'
@@ -675,7 +762,7 @@ export const FloorPlanScreen: React.FC = () => {
               setMeasureStart(null);
               setMeasureCurrent(null);
             }}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+            className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
               activeTool === 'measure'
                 ? 'bg-[#EEF4FF] text-[#2563EB] shadow-xs'
                 : 'text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB]'
@@ -685,13 +772,13 @@ export const FloorPlanScreen: React.FC = () => {
             <Ruler className="w-4 h-4" />
           </button>
 
-          <div className="w-8 h-[1px] bg-[#E4E7EC] my-1" />
+          <div className={isCompact ? 'w-px h-6 bg-[#E4E7EC] mx-1 shrink-0' : 'w-8 h-px bg-[#E4E7EC] my-1'} />
 
           {/* Fit Plan (F) */}
           <button
             id="btn-fit-plan"
             onClick={fitPlan}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
+            className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
             title="Fit Plan to Viewport (F)"
           >
             <Maximize2 className="w-4 h-4" />
@@ -702,7 +789,7 @@ export const FloorPlanScreen: React.FC = () => {
             onClick={() => {
               setScale((s) => Math.min(60, s * 1.2));
             }}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
+            className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
             title="Zoom In (+)"
           >
             <ZoomIn className="w-4 h-4" />
@@ -713,7 +800,7 @@ export const FloorPlanScreen: React.FC = () => {
             onClick={() => {
               setScale((s) => Math.max(4, s * 0.83));
             }}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
+            className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
             title="Zoom Out (-)"
           >
             <ZoomOut className="w-4 h-4" />
@@ -725,7 +812,7 @@ export const FloorPlanScreen: React.FC = () => {
               setScale(14);
               fitPlan();
             }}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
+            className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB] transition-colors"
             title="Reset Scale & View"
           >
             <RotateCcw className="w-4 h-4" />
@@ -736,16 +823,18 @@ export const FloorPlanScreen: React.FC = () => {
         <div
           ref={containerRef}
           onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          className={`flex-1 relative overflow-hidden flex items-center justify-center select-none ${
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+          className={`flex-1 relative overflow-hidden flex items-center justify-center select-none touch-none ${
             activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' : activeTool === 'measure' ? 'cursor-crosshair' : 'cursor-default'
           }`}
           style={{ backgroundColor: presetStyle.bg }}
         >
           {/* Floating Compass Badge */}
-          <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/95 backdrop-blur-md border border-[#E4E7EC] text-xs font-mono text-[#344054] shadow-xs pointer-events-none">
+          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-10 flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/95 backdrop-blur-md border border-[#E4E7EC] text-[11px] sm:text-xs font-mono text-[#344054] shadow-xs pointer-events-none max-w-[calc(100%-1.5rem)]">
             <Compass className="w-4 h-4 text-[#2563EB]" />
             <span className="font-semibold">North 0°</span>
             <span className="text-[#98A2B3]">|</span>
@@ -754,7 +843,7 @@ export const FloorPlanScreen: React.FC = () => {
 
           {/* Measure Tool Active Banner */}
           {activeTool === 'measure' && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 px-4 py-1.5 rounded-full bg-[#172033] text-white text-xs font-medium shadow-lg flex items-center gap-2 animate-bounce">
+            <div className="absolute top-14 sm:top-4 left-1/2 -translate-x-1/2 z-10 w-[calc(100%-1.5rem)] sm:w-auto px-4 py-1.5 rounded-full bg-[#172033] text-white text-[11px] sm:text-xs font-medium shadow-lg flex items-center justify-center gap-2 text-center">
               <Ruler className="w-3.5 h-3.5 text-[#38BDF8]" />
               <span>{measureStart ? 'Click second point to measure distance' : 'Click starting point to measure'}</span>
               <button
@@ -1291,6 +1380,7 @@ export const FloorPlanScreen: React.FC = () => {
             <g
               transform={`translate(${viewportSize.width - 240}, ${viewportSize.height - 85})`}
               className="pointer-events-none"
+              display={canShowTitleBlock ? undefined : 'none'}
             >
               <rect
                 width="225"
@@ -1319,6 +1409,7 @@ export const FloorPlanScreen: React.FC = () => {
             <g
               transform={`translate(24, ${viewportSize.height - 45})`}
               className="pointer-events-none"
+              display={canShowScaleBar ? undefined : 'none'}
             >
               <rect width="180" height="28" fill="#FFFFFF" opacity="0.9" rx="3" stroke="#E2E8F0" />
               <line x1="15" y1="18" x2="165" y2="18" stroke="#0F172A" strokeWidth="1.5" />
@@ -1340,8 +1431,8 @@ export const FloorPlanScreen: React.FC = () => {
           </svg>
 
           {/* Floating Compact Room Legend (Bottom-Left) for Numbered Rooms */}
-          {showLegend && compactLegendRooms.length > 0 && (
-            <div className="absolute bottom-16 left-4 bg-white/95 backdrop-blur-md border border-[#E4E7EC] rounded-xl p-3 shadow-lg max-w-xs z-10 animate-in fade-in">
+          {showLegend && compactLegendRooms.length > 0 && viewportSize.height >= 340 && (
+            <div className="absolute bottom-20 lg:bottom-16 left-3 sm:left-4 right-3 sm:right-auto bg-white/95 backdrop-blur-md border border-[#E4E7EC] rounded-xl p-3 shadow-lg sm:max-w-xs max-h-[38%] overflow-y-auto overscroll-contain z-10 animate-in fade-in">
               <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[#E4E7EC] text-xs font-bold text-[#172033]">
                 <div className="flex items-center gap-1.5">
                   <Hash className="w-3.5 h-3.5 text-[#2563EB]" />
@@ -1386,23 +1477,48 @@ export const FloorPlanScreen: React.FC = () => {
           )}
         </div>
 
-        {/* 3. Collapsible & Resizable Right Inspector Panel (300–340px) */}
+        {/* 3. Inspector — a resizable right column on desktop, a bottom sheet
+               over the canvas on compact screens. */}
+        {inspectorOpen && isCompact && (
+          <div
+            onClick={() => setInspectorOpen(false)}
+            className="absolute inset-0 z-30 bg-[#0F172A]/35 animate-in fade-in duration-150"
+            aria-hidden="true"
+          />
+        )}
         {inspectorOpen && (
           <div
-            style={{ width: `${inspectorWidth}px` }}
-            className="bg-white border-l border-[#E4E7EC] flex flex-col shrink-0 z-20 relative shadow-xs"
+            style={isCompact ? undefined : { width: `${inspectorWidth}px` }}
+            className={
+              isCompact
+                ? 'absolute inset-x-0 bottom-0 z-40 max-h-[72%] bg-white border-t border-[#E4E7EC] rounded-t-2xl flex flex-col shadow-2xl animate-in slide-sheet pb-safe'
+                : 'bg-white border-l border-[#E4E7EC] flex flex-col shrink-0 z-20 relative shadow-xs'
+            }
           >
-            {/* Drag Handle for Resizing Inspector */}
-            <div
-              onMouseDown={handleResizeStart}
-              className={`absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-[#2563EB]/20 transition-colors z-30 ${
-                isResizingInspector ? 'bg-[#2563EB]/40' : ''
-              }`}
-              title="Drag to resize inspector width (300-340px)"
-            />
+            {/* Grab affordance for the bottom sheet */}
+            {isCompact && (
+              <button
+                onClick={() => setInspectorOpen(false)}
+                aria-label="Close inspector"
+                className="w-full pt-2.5 pb-1 flex justify-center shrink-0"
+              >
+                <span className="w-10 h-1.5 rounded-full bg-[#D0D5DD]" />
+              </button>
+            )}
+
+            {/* Drag Handle for Resizing Inspector (desktop only) */}
+            {!isCompact && (
+              <div
+                onMouseDown={handleResizeStart}
+                className={`absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize hover:bg-[#2563EB]/20 transition-colors z-30 ${
+                  isResizingInspector ? 'bg-[#2563EB]/40' : ''
+                }`}
+                title="Drag to resize inspector width (300-340px)"
+              />
+            )}
 
             {/* Inspector Header */}
-            <div className="p-3.5 border-b border-[#E4E7EC] flex items-center justify-between">
+            <div className="p-3.5 border-b border-[#E4E7EC] flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-[#2563EB]" />
                 <span className="text-xs font-bold text-[#172033] uppercase tracking-wider">
@@ -1440,7 +1556,7 @@ export const FloorPlanScreen: React.FC = () => {
             </div>
 
             {/* Inspector Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4 text-xs">
               {selectedRoom ? (
                 <>
                   {/* Room Name & Zone */}
@@ -1615,12 +1731,14 @@ export const FloorPlanScreen: React.FC = () => {
       </div>
 
       {/* 4. Compact Bottom Status Bar (28–32px) */}
-      <footer className="h-7 bg-white border-t border-[#E4E7EC] px-3 sm:px-4 flex items-center justify-between text-[11px] text-[#667085] font-mono shrink-0 z-20">
+      <footer className="h-7 bg-white border-t border-[#E4E7EC] px-3 sm:px-4 flex items-center justify-between gap-3 text-[10px] sm:text-[11px] text-[#667085] font-mono shrink-0 z-20 overflow-hidden">
         {/* Left: Active Tool and Mouse World Coordinates */}
-        <div className="flex items-center gap-3">
-          <span className="text-[#344054] font-semibold uppercase">Tool: {activeTool}</span>
-          <span>|</span>
-          <span>
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <span className="text-[#344054] font-semibold uppercase whitespace-nowrap">
+            Tool: {activeTool}
+          </span>
+          <span className="hidden xs:inline">|</span>
+          <span className="hidden xs:inline truncate">
             Cursor:{' '}
             {mouseCoord
               ? `X: ${formatFeetInches(mouseCoord.xFt)}  Y: ${formatFeetInches(mouseCoord.yFt)}`
@@ -1629,18 +1747,18 @@ export const FloorPlanScreen: React.FC = () => {
         </div>
 
         {/* Center: Floor stats */}
-        <div className="hidden sm:flex items-center gap-3">
-          <span>
+        <div className="hidden xl:flex items-center gap-3 min-w-0">
+          <span className="whitespace-nowrap">
             {activeFloor === 1 ? 'Level 01 (Ground)' : 'Level 02 (Second)'} • {activeRooms.length} Spaces •{' '}
             {Math.round(floorGfa)} SF Measured
           </span>
           <span>|</span>
-          <span className="text-[#2563EB] font-semibold">{currentAlternative.name}</span>
+          <span className="text-[#2563EB] font-semibold truncate">{currentAlternative.name}</span>
         </div>
 
         {/* Right: Scale & Keyboard shortcuts reminder */}
-        <div className="flex items-center gap-3">
-          <span>Scale: {Math.round(scale)} px/ft</span>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="whitespace-nowrap">Scale: {Math.round(scale)} px/ft</span>
           <span className="hidden md:inline text-[#98A2B3]">
             [1: Ground | 2: Upper | 0: Overlay | F: Fit | Esc: Clear]
           </span>

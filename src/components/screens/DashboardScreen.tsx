@@ -167,9 +167,9 @@ export const DashboardScreen: React.FC = () => {
         </div>
 
         {/* Project Header Banner */}
-        <div className="bg-white border border-[#E4E7EC] rounded-xl p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div>
-            <div className="flex items-center gap-2 text-xs text-[#667085] mb-1.5">
+        <div className="bg-white border border-[#E4E7EC] rounded-xl p-4 sm:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-5 lg:gap-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#667085] mb-1.5">
               <MapPin className="w-3.5 h-3.5 text-[#2563EB]" />
               <span className="font-medium">{project.identity.location}</span>
               <span>•</span>
@@ -177,9 +177,9 @@ export const DashboardScreen: React.FC = () => {
               <span className="font-medium">{project.identity.buildingType}</span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#172033] flex items-center gap-3">
-              {project.identity.name}
-              <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-[#EEF4FF] text-[#2563EB] border border-[#2563EB]/20">
+            <h1 className="text-fluid-xl font-bold tracking-tight text-[#172033] flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <span className="break-words">{project.identity.name}</span>
+              <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-[#EEF4FF] text-[#2563EB] border border-[#2563EB]/20 whitespace-nowrap">
                 {project.activeRevision}
               </span>
             </h1>
@@ -189,7 +189,7 @@ export const DashboardScreen: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+          <div className="flex flex-col xs:flex-row items-stretch xs:items-center gap-2.5 shrink-0">
             <button
               onClick={() => setScreen('files')}
               className="px-3.5 py-2 rounded-lg border border-[#E4E7EC] hover:bg-[#F9FAFB] text-xs font-semibold text-[#172033] flex items-center justify-center gap-1.5 transition-colors"
@@ -210,10 +210,10 @@ export const DashboardScreen: React.FC = () => {
         </div>
 
         {/* 4 Clean Metric Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Site Land Area</div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">
               {project.plot.area} <span className="text-sm font-normal text-[#667085]">m²</span>
             </div>
             <div className="text-[11px] text-[#667085] mt-0.5">
@@ -223,7 +223,7 @@ export const DashboardScreen: React.FC = () => {
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Gross Floor Area (GFA)</div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">
               284 <span className="text-sm font-normal text-[#667085]">m²</span>
             </div>
             <div className="text-[11px] text-[#12B76A] mt-0.5 font-medium">
@@ -233,7 +233,7 @@ export const DashboardScreen: React.FC = () => {
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Target Cost Range</div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">
               $213k <span className="text-sm font-normal text-[#667085]">USD</span>
             </div>
             <div className="text-[11px] text-[#667085] mt-0.5">
@@ -243,7 +243,7 @@ export const DashboardScreen: React.FC = () => {
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Workflow Completion</div>
-            <div className="text-2xl font-bold text-[#2563EB] mt-1 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#2563EB] mt-1 font-mono">
               {calculateCompletion()}%
             </div>
             <div className="w-full bg-[#F2F4F7] h-1.5 rounded-full mt-2 overflow-hidden">

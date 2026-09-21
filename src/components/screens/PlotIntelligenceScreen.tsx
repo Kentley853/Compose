@@ -86,8 +86,8 @@ export const PlotIntelligenceScreen: React.FC = () => {
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Site & Plot Intelligence</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Site & Plot Intelligence</h1>
               <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 {width}m × {depth}m • {area} m²
               </span>
@@ -174,7 +174,7 @@ export const PlotIntelligenceScreen: React.FC = () => {
             </div>
 
             {/* SVG Diagram Canvas */}
-            <div className="relative my-4 flex items-center justify-center bg-[#F9FAFB] border border-[#E4E7EC] rounded-xl p-3 overflow-hidden min-h-[500px]">
+            <div className="relative my-4 flex items-center justify-center bg-[#F9FAFB] border border-[#E4E7EC] rounded-xl p-2 sm:p-3 overflow-hidden min-h-[16rem] sm:min-h-[24rem] lg:min-h-[31.25rem]">
               {/* North Indicator Badge */}
               <div className="absolute top-4 left-4 z-10 flex flex-col items-center bg-white border border-[#E4E7EC] px-2.5 py-2 rounded-lg shadow-xs text-xs">
                 <Navigation className="w-4 h-4 text-[#2563EB]" />
@@ -184,7 +184,7 @@ export const PlotIntelligenceScreen: React.FC = () => {
 
               <svg
                 viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-                className="w-full max-h-[500px] transition-transform duration-200"
+                className="w-full max-h-[16rem] sm:max-h-[24rem] lg:max-h-[31.25rem] transition-transform duration-200"
                 style={{ transform: `scale(${zoomLevel})` }}
               >
                 <defs>
