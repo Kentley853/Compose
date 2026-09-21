@@ -86,8 +86,8 @@ export const DeliverablesScreen: React.FC = () => {
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Executive Deliverables & PDF Dossier</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Executive Deliverables & PDF Dossier</h1>
               <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 Client Presentation Ready
               </span>
@@ -364,8 +364,8 @@ export const DeliverablesScreen: React.FC = () => {
             </div>
 
             {/* Room Schedule Table */}
-            <div className="overflow-x-auto border border-[#E4E7EC] rounded-lg">
-              <table className="w-full text-xs text-left">
+            <div className="overflow-x-auto overscroll-x-contain border border-[#E4E7EC] rounded-lg">
+              <table className="w-full min-w-[46rem] text-xs text-left">
                 <thead className="bg-[#F9FAFB] border-b border-[#E4E7EC] text-[10px] font-bold uppercase text-[#667085]">
                   <tr>
                     <th className="p-3">Space Name</th>
@@ -493,8 +493,8 @@ export const DeliverablesScreen: React.FC = () => {
             </div>
 
             {/* BOQ Schedule Table */}
-            <div className="overflow-x-auto border border-[#E4E7EC] rounded-lg">
-              <table className="w-full text-xs text-left">
+            <div className="overflow-x-auto overscroll-x-contain border border-[#E4E7EC] rounded-lg">
+              <table className="w-full min-w-[46rem] text-xs text-left">
                 <thead className="bg-[#F9FAFB] border-b border-[#E4E7EC] text-[10px] font-bold uppercase text-[#667085]">
                   <tr>
                     <th className="p-3">Category</th>

@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
+import { MobileTabBar } from './components/layout/MobileTabBar';
 import { GuidedWorkflowBar } from './components/layout/GuidedWorkflowBar';
 import { PresentationBar } from './components/layout/PresentationBar';
 import { ToastContainer } from './components/common/Toast';
 import { SettingsModal } from './components/screens/SettingsModal';
 import { OnboardingModal } from './components/common/OnboardingModal';
+import { useIsMobileShell } from './hooks/useMediaQuery';
+import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 
 // Screens
 import { LandingScreen } from './components/screens/LandingScreen';
@@ -25,8 +28,35 @@ import { FilesScreen } from './components/screens/FilesScreen';
 import { ActivityScreen } from './components/screens/ActivityScreen';
 
 const MainAppContent: React.FC = () => {
-  const { currentScreen, presentationMode, onboardingOpen, setOnboardingOpen } = useProject();
+  const { currentScreen, onboardingOpen, setOnboardingOpen } = useProject();
   const [guideOpen, setGuideOpen] = useState(false);
+
+  // Below `lg` the sidebar becomes an off-canvas drawer instead of a column.
+  const isMobileShell = useIsMobileShell();
+  const [navOpen, setNavOpen] = useState(false);
+
+  const closeNav = useCallback(() => setNavOpen(false), []);
+
+  // Navigating on a phone should dismiss the drawer it was triggered from.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [currentScreen]);
+
+  // Returning to a wide viewport must never leave a stale drawer behind.
+  useEffect(() => {
+    if (!isMobileShell) setNavOpen(false);
+  }, [isMobileShell]);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navOpen]);
+
+  useBodyScrollLock(navOpen && isMobileShell);
 
   if (currentScreen === 'landing') {
     return <LandingScreen />;
@@ -65,30 +95,50 @@ const MainAppContent: React.FC = () => {
     }
   };
 
+  const openGuide = () => setGuideOpen(true);
+
   return (
-    <div className="flex h-screen bg-[#F7F8FA] text-[#172033] overflow-hidden font-sans antialiased selection:bg-[#2563EB] selection:text-white">
-      {/* Collapsible Left Sidebar */}
-      <Sidebar />
+    <div className="flex h-app w-full bg-[#F7F8FA] text-[#172033] overflow-hidden font-sans antialiased selection:bg-[#2563EB] selection:text-white">
+      {/* Scrim behind the mobile drawer */}
+      {isMobileShell && navOpen && (
+        <div
+          onClick={closeNav}
+          className="fixed inset-0 z-40 bg-[#0F172A]/45 backdrop-blur-[2px] lg:hidden animate-in fade-in duration-150"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar: static column on desktop, off-canvas drawer below `lg` */}
+      <Sidebar
+        isDrawer={isMobileShell}
+        open={navOpen}
+        onClose={closeNav}
+        onOpenOnboarding={openGuide}
+      />
 
       {/* Main Workspace Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         {/* Sticky Top Navbar */}
-        <Navbar onOpenOnboarding={() => setGuideOpen(true)} />
+        <Navbar
+          onOpenOnboarding={openGuide}
+          onOpenNav={() => setNavOpen(true)}
+          showNavToggle={isMobileShell}
+          navOpen={navOpen}
+        />
 
         {/* Guided Workflow Stepper Bar */}
-        <GuidedWorkflowBar />
+        <GuidedWorkflowBar onOpenHelp={openGuide} />
 
         {/* Floating Presentation Bar when active */}
         <PresentationBar />
 
         {/* Scrollable Screen Content */}
-        <main
-          className={`flex-1 overflow-y-auto overflow-x-hidden flex flex-col transition-all ${
-            presentationMode ? 'pt-12' : ''
-          }`}
-        >
+        <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col">
           {renderActiveScreen()}
         </main>
+
+        {/* Bottom quick-nav on phones — keeps the core workflow one tap away */}
+        <MobileTabBar />
       </div>
 
       {/* Toast Notifications */}

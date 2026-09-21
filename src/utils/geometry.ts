@@ -162,8 +162,11 @@ export function calculateFitViewport(
   viewport: { width: number; height: number },
   paddingRatio = 0.10
 ): ViewportFit {
-  const vpW = Math.max(viewport.width, 300);
-  const vpH = Math.max(viewport.height, 300);
+  // Guard against a zero-sized container (pre-layout, hidden tab) without
+  // inflating a genuinely small one: clamping up to 300px here made the plan
+  // overflow short viewports, such as a phone held in landscape.
+  const vpW = Math.max(viewport.width, 1);
+  const vpH = Math.max(viewport.height, 1);
 
   const paddingX = vpW * paddingRatio;
   const paddingY = vpH * paddingRatio;

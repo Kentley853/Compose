@@ -208,8 +208,8 @@ export const ExteriorConceptScreen: React.FC = () => {
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Façade & Exterior Concept</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Façade & Exterior Concept</h1>
               <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 {activePalette.name}
               </span>
@@ -305,7 +305,7 @@ export const ExteriorConceptScreen: React.FC = () => {
             </div>
 
             {/* SVG Dynamic Elevation Drawing matching active palette */}
-            <div className="bg-[#F9FAFB] border border-[#E4E7EC] rounded-xl p-6 flex items-center justify-center min-h-[400px]">
+            <div className="bg-[#F9FAFB] border border-[#E4E7EC] rounded-xl p-3 sm:p-6 flex items-center justify-center min-h-[15rem] sm:min-h-[25rem]">
               <svg viewBox="0 0 520 370" className="w-full max-h-[380px] select-none">
                 <defs>
                   {/* Subtle drop shadow */}

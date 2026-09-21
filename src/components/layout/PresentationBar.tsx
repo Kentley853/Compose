@@ -16,13 +16,19 @@ export const PresentationBar: React.FC = () => {
   if (!presentationMode) return null;
 
   return (
-    <div className="fixed top-14 left-64 right-0 z-40 bg-slate-900/95 border-b border-blue-500/30 backdrop-blur-md px-6 py-2.5 shadow-xl transition-all">
-      <div className="flex items-center justify-between gap-4">
+    <div
+      data-print-hide
+      className="shrink-0 z-40 bg-slate-900/95 border-b border-blue-500/30 backdrop-blur-md px-3 sm:px-6 py-2 sm:py-2.5 shadow-xl"
+    >
+      <div className="flex items-center justify-between gap-2 sm:gap-4">
         {/* Step info & Speaker Cue */}
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs font-mono shrink-0">
             <PlayCircle className="w-3.5 h-3.5 text-blue-400" />
-            <span>STEP {presentationStep} / 10</span>
+            <span className="whitespace-nowrap">
+              <span className="hidden xs:inline">STEP </span>
+              {presentationStep} / 10
+            </span>
           </div>
 
           <div className="min-w-0">
@@ -33,7 +39,7 @@ export const PresentationBar: React.FC = () => {
                 {currentStepInfo.investorObjective}
               </span>
             </div>
-            <div className="text-[11px] text-blue-300/90 truncate flex items-center gap-1">
+            <div className="hidden sm:flex text-[11px] text-blue-300/90 truncate items-center gap-1">
               <span className="font-mono text-[10px] uppercase text-slate-400">Speaker cue:</span>
               <span>{currentStepInfo.speakerCue}</span>
             </div>
@@ -67,7 +73,7 @@ export const PresentationBar: React.FC = () => {
             className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs disabled:opacity-40 disabled:pointer-events-none transition-colors border border-slate-700"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
-            <span>Prev</span>
+            <span className="hidden sm:inline">Prev</span>
           </button>
 
           <button
@@ -76,7 +82,7 @@ export const PresentationBar: React.FC = () => {
             disabled={presentationStep === PRESENTATION_STEPS.length}
             className="flex items-center gap-1 px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium disabled:opacity-40 disabled:pointer-events-none transition-colors shadow-sm"
           >
-            <span>Next</span>
+            <span className="hidden sm:inline">Next</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
 

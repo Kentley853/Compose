@@ -33,8 +33,8 @@ export const ActivityScreen: React.FC = () => {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Project Activity & Revisions</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Project Activity & Revisions</h1>
               <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB] font-semibold">
                 Current: {project.activeRevision}
               </span>

@@ -56,7 +56,7 @@ export const HelpTooltip: React.FC<HelpTooltipProps> = ({
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-white text-[#172033] border border-[#E4E7EC] rounded-lg shadow-xl text-xs z-50 animate-in fade-in zoom-in-95">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[min(16rem,calc(100vw-2rem))] p-3 bg-white text-[#172033] border border-[#E4E7EC] rounded-lg shadow-xl text-xs z-50 animate-in fade-in zoom-in-95">
           <div className="flex items-start justify-between gap-1 pb-1 mb-1 border-b border-[#E4E7EC]">
             <span className="font-semibold text-[#172033]">{term}</span>
             <button

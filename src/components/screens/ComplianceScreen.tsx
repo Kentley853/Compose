@@ -120,8 +120,8 @@ export const ComplianceScreen: React.FC = () => {
         {/* Screen Title & Action */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Preliminary Compliance Review</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Preliminary Compliance Review</h1>
               <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 {project.activeRevision}
               </span>
@@ -144,7 +144,7 @@ export const ComplianceScreen: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Checks completed</div>
-            <div className="text-2xl font-bold text-[#172033] mt-1 font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#172033] mt-1 font-mono">
               {project.complianceChecks.length}
             </div>
             <div className="text-[11px] text-[#667085] mt-0.5">Automated screening</div>
@@ -152,19 +152,19 @@ export const ComplianceScreen: React.FC = () => {
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Passed</div>
-            <div className="text-2xl font-bold text-[#027A48] mt-1 font-mono">{passedCount}</div>
+            <div className="text-xl sm:text-2xl font-bold text-[#027A48] mt-1 font-mono">{passedCount}</div>
             <div className="text-[11px] text-[#12B76A] mt-0.5">Clear statutory envelope</div>
           </div>
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Needs attention</div>
-            <div className="text-2xl font-bold text-[#B54708] mt-1 font-mono">{warningCount}</div>
+            <div className="text-xl sm:text-2xl font-bold text-[#B54708] mt-1 font-mono">{warningCount}</div>
             <div className="text-[11px] text-[#F79009] mt-0.5">Refinements recommended</div>
           </div>
 
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Professional review</div>
-            <div className="text-2xl font-bold text-[#2563EB] mt-1 font-mono">{reviewCount}</div>
+            <div className="text-xl sm:text-2xl font-bold text-[#2563EB] mt-1 font-mono">{reviewCount}</div>
             <div className="text-[11px] text-[#2563EB] mt-0.5">Architect & Engineer</div>
           </div>
         </div>

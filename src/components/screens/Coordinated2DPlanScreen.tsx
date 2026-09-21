@@ -86,8 +86,8 @@ export const Coordinated2DPlanScreen: React.FC = () => {
         {/* Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#172033] tracking-tight">Coordinated 2D Architectural Plan</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Coordinated 2D Architectural Plan</h1>
               <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 Sheet A-10{activeFloor} • Scale 1/8" = 1'-0"
               </span>
@@ -127,16 +127,16 @@ export const Coordinated2DPlanScreen: React.FC = () => {
 
         {/* Sync Prompt if views outdated */}
         {project.dependentOutputsOutdated && (
-          <div className="p-3 bg-[#FFF4ED] border border-[#FECDCA] rounded-xl flex items-center justify-between text-xs text-[#B54708]">
-            <div className="flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin text-[#F79009]" />
+          <div className="p-3 bg-[#FFF4ED] border border-[#FECDCA] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#B54708]">
+            <div className="flex items-start sm:items-center gap-2">
+              <RefreshCw className="w-4 h-4 shrink-0 mt-0.5 sm:mt-0 animate-spin text-[#F79009]" />
               <span>
                 <strong>Plan Outdated:</strong> Space schedule or dimensions were modified. Synchronize drawing sheet now.
               </span>
             </div>
             <button
               onClick={regenerateDependentViews}
-              className="px-3 py-1 bg-[#F79009] hover:bg-[#DC6803] text-white rounded-lg font-semibold shadow-xs transition-colors"
+              className="shrink-0 self-start sm:self-auto px-3 py-1.5 bg-[#F79009] hover:bg-[#DC6803] text-white rounded-lg font-semibold shadow-xs transition-colors whitespace-nowrap"
             >
               Synchronize 2D Plan
             </button>
@@ -157,7 +157,8 @@ export const Coordinated2DPlanScreen: React.FC = () => {
                     : 'text-[#667085] hover:text-[#172033]'
                 }`}
               >
-                Ground Floor (A-101)
+                <span className="hidden sm:inline">Ground Floor (A-101)</span>
+                <span className="sm:hidden">A-101</span>
               </button>
               <button
                 onClick={() => setActiveFloor(2)}
@@ -167,7 +168,8 @@ export const Coordinated2DPlanScreen: React.FC = () => {
                     : 'text-[#667085] hover:text-[#172033]'
                 }`}
               >
-                Second Level (A-102)
+                <span className="hidden sm:inline">Second Level (A-102)</span>
+                <span className="sm:hidden">A-102</span>
               </button>
             </div>
           </div>
@@ -194,19 +196,21 @@ export const Coordinated2DPlanScreen: React.FC = () => {
         </div>
 
         {/* CAD White Drafting Sheet Container */}
-        <div className="bg-white border border-[#E4E7EC] rounded-xl p-5 sm:p-7 shadow-xs relative flex flex-col items-center">
+        <div className="bg-white border border-[#E4E7EC] rounded-xl p-3 sm:p-5 lg:p-7 shadow-xs relative flex flex-col items-center">
           {/* Top Drawing Meta Header */}
-          <div className="w-full max-w-3xl flex items-center justify-between pb-3 mb-2 border-b border-[#E4E7EC] text-xs text-[#667085]">
-            <div className="flex items-center gap-3">
+          <div className="w-full max-w-3xl flex flex-col md:flex-row md:items-center justify-between gap-2 pb-3 mb-2 border-b border-[#E4E7EC] text-xs text-[#667085]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-bold text-[#172033]">{project.identity.name}</span>
-              <span>•</span>
+              <span aria-hidden="true">•</span>
               <span className="font-medium">
                 {activeFloor === 1 ? 'Ground Level Architectural Plan' : 'Second Level Floor Plan'}
               </span>
-              <span>•</span>
-              <span className="text-[#2563EB] font-mono font-semibold">Scale 1/8" = 1'-0"</span>
+              <span aria-hidden="true">•</span>
+              <span className="text-[#2563EB] font-mono font-semibold whitespace-nowrap">
+                Scale 1/8" = 1'-0"
+              </span>
             </div>
-            <div className="flex items-center gap-3 font-mono text-[11px]">
+            <div className="flex items-center gap-3 font-mono text-[11px] shrink-0">
               <span className="px-2 py-0.5 rounded bg-[#F2F4F7] text-[#344054] font-semibold">
                 Rev: {project.activeRevision}
               </span>
@@ -215,7 +219,7 @@ export const Coordinated2DPlanScreen: React.FC = () => {
           </div>
 
           {/* SVG Vector Drawing */}
-          <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full max-w-3xl max-h-[640px] bg-white select-none">
+          <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full max-w-3xl max-h-[60vh] sm:max-h-[40rem] bg-white select-none">
             <defs>
               <pattern id="cadGrid" width="20" height="20" patternUnits="userSpaceOnUse">
                 <circle cx="10" cy="10" r="0.6" fill="#CBD5E1" />

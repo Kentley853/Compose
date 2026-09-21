@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useProject } from '../../context/ProjectContext';
 import * as THREE from 'three';
 import {
@@ -15,6 +16,7 @@ import {
   Info,
   Compass,
   Sliders,
+  SlidersHorizontal,
   ChevronRight,
   ChevronLeft,
   Scissors,
@@ -70,6 +72,17 @@ export const Coordinated3DModelScreen: React.FC = () => {
   const [isOrtho, setIsOrtho] = useState<boolean>(false);
   const [sunHour, setSunHour] = useState<number>(14); // 2:00 PM
   const [inspectorOpen, setInspectorOpen] = useState<boolean>(true);
+  // Below `lg` the model gets the whole canvas: the inspector becomes a bottom
+  // sheet and the floating control panels collapse behind one toggle.
+  const isCompact = useMediaQuery('(max-width: 1023px)');
+  const [overlaysOpen, setOverlaysOpen] = useState<boolean>(true);
+
+  // Default to an uncluttered model on small screens; both panels are one tap
+  // away in the toolbar.
+  useEffect(() => {
+    setInspectorOpen(!isCompact);
+    setOverlaysOpen(!isCompact);
+  }, [isCompact]);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [webglSupported, setWebglSupported] = useState<boolean>(true);
 
@@ -256,14 +269,50 @@ export const Coordinated3DModelScreen: React.FC = () => {
     // Raycaster for 3D Room Selection
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+    const dom = renderer.domElement;
 
-    const onMouseDown = (e: MouseEvent) => {
+    // Orbit / pick / pinch. Pointer events give the same gestures to a mouse,
+    // a finger and a stylus; two fingers dolly the camera like the wheel does.
+    const livePointers = new Map<number, { x: number; y: number }>();
+    let pinchStartDist = 0;
+    let pinchStartRadius = radius;
+
+    const pointerSpread = () => {
+      const pts = [...livePointers.values()];
+      if (pts.length < 2) return 0;
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      livePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      dom.setPointerCapture?.(e.pointerId);
+
+      if (livePointers.size === 2) {
+        isDragging = false;
+        pinchStartDist = pointerSpread();
+        pinchStartRadius = radius;
+        return;
+      }
+
       isDragging = true;
       prevX = e.clientX;
       prevY = e.clientY;
     };
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
+      if (livePointers.has(e.pointerId)) {
+        livePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      if (livePointers.size >= 2 && pinchStartDist > 0) {
+        const spread = pointerSpread();
+        if (spread > 0) {
+          radius = Math.max(12, Math.min(85, pinchStartRadius * (pinchStartDist / spread)));
+          updateCameraPos();
+        }
+        return;
+      }
+
       if (!isDragging) return;
       const deltaX = e.clientX - prevX;
       const deltaY = e.clientY - prevY;
@@ -275,12 +324,16 @@ export const Coordinated3DModelScreen: React.FC = () => {
       updateCameraPos();
     };
 
-    const onMouseUp = (e: MouseEvent) => {
+    const onPointerUp = (e: PointerEvent) => {
+      const wasPinching = livePointers.size >= 2;
+      livePointers.delete(e.pointerId);
+      if (livePointers.size < 2) pinchStartDist = 0;
+
       // Check if it was a quick click without drag (room selection)
       const dist = Math.abs(e.clientX - prevX) + Math.abs(e.clientY - prevY);
       isDragging = false;
 
-      if (dist < 4 && mountRef.current) {
+      if (!wasPinching && dist < 4 && mountRef.current) {
         const rect = mountRef.current.getBoundingClientRect();
         mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -305,10 +358,10 @@ export const Coordinated3DModelScreen: React.FC = () => {
       updateCameraPos();
     };
 
-    const dom = renderer.domElement;
-    dom.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    dom.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     dom.addEventListener('wheel', onWheel, { passive: false });
 
     // Animation Loop
@@ -337,9 +390,10 @@ export const Coordinated3DModelScreen: React.FC = () => {
 
     return () => {
       cancelAnimationFrame(animId);
-      dom.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      dom.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       dom.removeEventListener('wheel', onWheel);
       resizeObserver.disconnect();
       renderer.dispose();
@@ -587,9 +641,12 @@ export const Coordinated3DModelScreen: React.FC = () => {
   return (
     <div className="flex flex-col h-full bg-[#F7F8FA] overflow-hidden select-none">
       {/* 1. Top Architectural Toolbar */}
-      <header className="h-12 bg-white border-b border-[#E4E7EC] px-4 flex items-center justify-between gap-3 shrink-0 z-20">
+      <header className="h-12 bg-white border-b border-[#E4E7EC] px-2 sm:px-4 flex items-center gap-2 sm:gap-3 shrink-0 z-20">
+        {/* Style, camera and floor-isolation groups share one scroller so they
+            stay reachable on a phone; the action cluster stays pinned right. */}
+        <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar">
         {/* Left: View Presets & Camera controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Style Selector */}
           <div className="flex items-center bg-[#F2F4F7] p-1 rounded-lg text-xs font-semibold">
             <button
@@ -621,7 +678,7 @@ export const Coordinated3DModelScreen: React.FC = () => {
           <div className="h-4 w-[1px] bg-[#E4E7EC] mx-1 hidden sm:block" />
 
           {/* Camera Angles */}
-          <div className="hidden sm:flex items-center gap-1 text-xs">
+          <div className="hidden xl:flex items-center gap-1 text-xs">
             {(['axon', 'top', 'front', 'back', 'left', 'right'] as CameraPreset[]).map((p) => (
               <button
                 key={p}
@@ -635,14 +692,15 @@ export const Coordinated3DModelScreen: React.FC = () => {
         </div>
 
         {/* Center: Floor Isolation buttons */}
-        <div className="flex items-center gap-1 bg-[#F2F4F7] p-1 rounded-lg text-xs font-semibold">
+        <div className="flex items-center gap-1 bg-[#F2F4F7] p-1 rounded-lg text-xs font-semibold shrink-0 whitespace-nowrap">
           <button
             onClick={() => setFloorIsolation('all')}
             className={`px-2.5 py-1 rounded-md transition-colors ${
               floorIsolation === 'all' ? 'bg-white text-[#2563EB] shadow-xs' : 'text-[#667085] hover:text-[#172033]'
             }`}
           >
-            All Floors
+            <span className="hidden xl:inline">All Floors</span>
+            <span className="xl:hidden">All</span>
           </button>
           <button
             onClick={() => setFloorIsolation('ground')}
@@ -650,7 +708,8 @@ export const Coordinated3DModelScreen: React.FC = () => {
               floorIsolation === 'ground' ? 'bg-white text-[#2563EB] shadow-xs' : 'text-[#667085] hover:text-[#172033]'
             }`}
           >
-            Ground Only
+            <span className="hidden xl:inline">Ground Only</span>
+            <span className="xl:hidden">Ground</span>
           </button>
           <button
             onClick={() => setFloorIsolation('second')}
@@ -658,16 +717,31 @@ export const Coordinated3DModelScreen: React.FC = () => {
               floorIsolation === 'second' ? 'bg-white text-[#2563EB] shadow-xs' : 'text-[#667085] hover:text-[#172033]'
             }`}
           >
-            Second Only
+            <span className="hidden xl:inline">Second Only</span>
+            <span className="xl:hidden">Second</span>
           </button>
         </div>
 
+        </div>
+
         {/* Right: Quick Actions & Toggles */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Floating-panel toggle (compact screens only) */}
+          <button
+            onClick={() => setOverlaysOpen(!overlaysOpen)}
+            className={`lg:hidden p-1.5 rounded-lg border border-[#E4E7EC] transition-colors ${
+              overlaysOpen ? 'bg-[#EEF4FF] text-[#2563EB]' : 'text-[#667085] hover:text-[#172033]'
+            }`}
+            aria-pressed={overlaysOpen}
+            title={overlaysOpen ? 'Hide model controls' : 'Show model controls'}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+          </button>
+
           {/* Roof Toggle */}
           <button
             onClick={() => setShowRoof(!showRoof)}
-            className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors ${
+            className={`hidden sm:block px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap ${
               showRoof ? 'bg-white text-[#344054] border-[#E4E7EC]' : 'bg-[#F2F4F7] text-[#98A2B3] border-transparent'
             }`}
             title="Toggle Roof Slab"
@@ -678,20 +752,23 @@ export const Coordinated3DModelScreen: React.FC = () => {
           {/* Hide Exterior Walls Toggle */}
           <button
             onClick={() => setHideExteriorWalls(!hideExteriorWalls)}
-            className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors ${
+            className={`hidden md:block px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap ${
               hideExteriorWalls
                 ? 'bg-[#EEF4FF] text-[#2563EB] border-[#2563EB]/30'
                 : 'bg-white text-[#344054] border-[#E4E7EC]'
             }`}
             title="Hide Exterior Walls to inspect interior spaces"
           >
-            {hideExteriorWalls ? 'Interior Exposed' : 'Solid Facade'}
+            <span className="hidden xl:inline">
+              {hideExteriorWalls ? 'Interior Exposed' : 'Solid Facade'}
+            </span>
+            <span className="xl:hidden">{hideExteriorWalls ? 'Interior' : 'Facade'}</span>
           </button>
 
           {/* Turntable Auto-rotate */}
           <button
             onClick={() => setIsTurntable(!isTurntable)}
-            className={`p-1.5 rounded-lg border border-[#E4E7EC] transition-colors ${
+            className={`hidden sm:block p-1.5 rounded-lg border border-[#E4E7EC] transition-colors ${
               isTurntable ? 'bg-[#EEF4FF] text-[#2563EB]' : 'text-[#667085] hover:text-[#172033]'
             }`}
             title="Auto-rotate turntable"
@@ -702,9 +779,10 @@ export const Coordinated3DModelScreen: React.FC = () => {
           {/* Quick-switch to 2D Floor Plan */}
           <button
             onClick={() => setScreen('floorplan')}
-            className="px-3 py-1 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1"
+            className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1 whitespace-nowrap"
           >
-            <span>2D Plan</span>
+            <span className="hidden sm:inline">2D Plan</span>
+            <span className="sm:hidden">2D</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
 
@@ -725,10 +803,14 @@ export const Coordinated3DModelScreen: React.FC = () => {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Central 3D Canvas Mount (Dominant Space) */}
         <div className="flex-1 relative h-full bg-[#F7F8FA]">
-          <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+          <div ref={mountRef} className="w-full h-full touch-none cursor-grab active:cursor-grabbing" />
 
           {/* Left Overlay: SECTION CUT SLIDER ("Section Height") */}
-          <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-[#E4E7EC] shadow-lg z-10 w-64 space-y-3">
+          <div
+            className={`${
+              overlaysOpen ? 'flex' : 'hidden'
+            } lg:flex flex-col absolute top-3 left-3 lg:top-4 lg:left-4 right-3 lg:right-auto bg-white/95 backdrop-blur-md p-3 lg:p-3.5 rounded-xl border border-[#E4E7EC] shadow-lg z-10 w-auto lg:w-64 max-w-[20rem] space-y-3 max-h-[45%] overflow-y-auto overscroll-contain`}
+          >
             <div className="flex items-center justify-between pb-1 border-b border-[#E4E7EC]">
               <div className="flex items-center gap-1.5">
                 <Scissors className="w-4 h-4 text-[#2563EB]" />
@@ -797,10 +879,15 @@ export const Coordinated3DModelScreen: React.FC = () => {
           </div>
 
           {/* Bottom Center Overlay: EXPLODED FLOOR SEPARATION ("Separate Floors") */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-md px-4 py-2.5 rounded-xl border border-[#E4E7EC] shadow-lg z-10 flex items-center gap-3 text-xs">
-            <div className="flex items-center gap-1.5 font-bold text-[#172033]">
+          <div
+            className={`${
+              overlaysOpen ? 'flex' : 'hidden'
+            } lg:flex absolute bottom-3 lg:bottom-4 left-3 right-3 lg:left-1/2 lg:right-auto lg:-translate-x-1/2 bg-white/95 backdrop-blur-md px-3 lg:px-4 py-2 lg:py-2.5 rounded-xl border border-[#E4E7EC] shadow-lg z-10 items-center justify-center flex-wrap lg:flex-nowrap gap-2 lg:gap-3 text-xs`}
+          >
+            <div className="flex items-center gap-1.5 font-bold text-[#172033] shrink-0">
               <Split className="w-4 h-4 text-[#2563EB]" />
-              <span>Separate Floors:</span>
+              <span className="hidden xs:inline">Separate Floors:</span>
+              <span className="xs:hidden">Floors</span>
             </div>
             <input
               type="range"
@@ -809,14 +896,14 @@ export const Coordinated3DModelScreen: React.FC = () => {
               step={0.02}
               value={explodedSeparation}
               onChange={(e) => setExplodedSeparation(Number(e.target.value))}
-              className="w-36 sm:w-48 accent-[#2563EB] cursor-pointer"
+              className="flex-1 min-w-[6rem] max-w-[12rem] accent-[#2563EB] cursor-pointer"
             />
             <span className="font-mono text-[11px] font-bold text-[#2563EB] w-12">
               {Math.round(explodedSeparation * 100)}%
             </span>
 
             {/* Exploded Presets */}
-            <div className="flex items-center gap-1 border-l border-[#E4E7EC] pl-2">
+            <div className="hidden sm:flex items-center gap-1 border-l border-[#E4E7EC] pl-2 shrink-0">
               <button
                 onClick={() => setExplodedSeparation(0)}
                 className={`px-2 py-0.5 rounded text-[11px] font-medium ${
@@ -844,8 +931,13 @@ export const Coordinated3DModelScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Bottom Right: Sun Study Slider */}
-          <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md p-2.5 rounded-xl border border-[#E4E7EC] shadow-lg flex items-center gap-2 text-xs z-10">
+          {/* Bottom Right: Sun Study Slider — sits above the exploded panel on
+              compact screens, where both would otherwise share the same row. */}
+          <div
+            className={`${
+              overlaysOpen ? 'flex' : 'hidden'
+            } lg:flex absolute bottom-20 right-3 lg:bottom-4 lg:right-4 bg-white/95 backdrop-blur-md p-2 lg:p-2.5 rounded-xl border border-[#E4E7EC] shadow-lg items-center gap-2 text-xs z-10`}
+          >
             <Sun className="w-4 h-4 text-[#F59E0B] shrink-0" />
             <span className="text-[#667085] font-medium">Sun: {sunHour}:00</span>
             <input
@@ -860,10 +952,33 @@ export const Coordinated3DModelScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* 3. Right-side Massing & Space Inspector */}
+        {/* 3. Massing & Space Inspector — right column on desktop, bottom sheet
+               over the model on compact screens. */}
+        {inspectorOpen && isCompact && (
+          <div
+            onClick={() => setInspectorOpen(false)}
+            className="absolute inset-0 z-30 bg-[#0F172A]/35 animate-in fade-in duration-150"
+            aria-hidden="true"
+          />
+        )}
         {inspectorOpen && (
-          <div className="w-80 bg-white border-l border-[#E4E7EC] flex flex-col shrink-0 z-20 shadow-xs">
-            <div className="p-3.5 border-b border-[#E4E7EC] flex items-center justify-between">
+          <div
+            className={
+              isCompact
+                ? 'absolute inset-x-0 bottom-0 z-40 max-h-[72%] bg-white border-t border-[#E4E7EC] rounded-t-2xl flex flex-col shadow-2xl animate-in slide-sheet pb-safe'
+                : 'w-80 bg-white border-l border-[#E4E7EC] flex flex-col shrink-0 z-20 shadow-xs'
+            }
+          >
+            {isCompact && (
+              <button
+                onClick={() => setInspectorOpen(false)}
+                aria-label="Close inspector"
+                className="w-full pt-2.5 pb-1 flex justify-center shrink-0"
+              >
+                <span className="w-10 h-1.5 rounded-full bg-[#D0D5DD]" />
+              </button>
+            )}
+            <div className="p-3.5 border-b border-[#E4E7EC] flex items-center justify-between shrink-0">
               <span className="text-xs font-bold text-[#172033] uppercase tracking-wider">
                 3D Model & Space Inspector
               </span>
@@ -875,7 +990,7 @@ export const Coordinated3DModelScreen: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4 text-xs">
               {/* Selected Room Details (Synchronized with 2D) */}
               {selectedRoom ? (
                 <div className="p-3.5 rounded-xl bg-[#EEF4FF] border border-[#2563EB]/20 space-y-2.5 animate-in fade-in">
