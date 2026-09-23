@@ -12,6 +12,8 @@ import {
   FileCategory,
 } from '../types/architecture';
 import { INITIAL_JAKARTA_PROJECT, SAMPLE_PROJECTS_LIST } from '../data/sampleProjects';
+import { useAuth } from './AuthContext';
+import { saveProjectToSupabase, fetchProjectById } from '../services/supabase';
 
 export interface ToastMessage {
   id: string;
@@ -146,7 +148,11 @@ interface ProjectContextType {
   switchToLiveMode: () => void;
   resetDemo: () => void;
   isAutosaving: boolean;
+  autosaveStatus: 'idle' | 'saving' | 'saved' | 'failed';
   autosaveTime: string;
+  retryAutosave: () => void;
+  openProjectById: (projectId: string) => Promise<void>;
+  isLoadingProject: boolean;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
   onboardingOpen: boolean;
@@ -207,28 +213,70 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [wasteFactor, setWasteFactor] = useState<number>(8);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);
+  const { user } = useAuth();
   const [presentationStep, setPresentationStep] = useState<number>(1);
   const [isAutosaving, setIsAutosaving] = useState<boolean>(false);
+  const [autosaveStatus, setAutosaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('saved');
   const [autosaveTime, setAutosaveTime] = useState<string>('Just now');
+  const [isLoadingProject, setIsLoadingProject] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
 
-  // Autosave to appropriate key
-  useEffect(() => {
+  // Core save executor
+  const persistProject = async (currentProj: ProjectData) => {
     setIsAutosaving(true);
-    const timer = setTimeout(() => {
-      try {
-        const key = demoMode ? LOCAL_STORAGE_KEY_DEMO : LOCAL_STORAGE_KEY_LIVE;
-        localStorage.setItem(key, JSON.stringify(project));
-      } catch (e) {
-        console.warn('LocalStorage save error:', e);
+    setAutosaveStatus('saving');
+
+    try {
+      // Step 1: Immediate local storage preservation (offline resilience)
+      const key = demoMode ? LOCAL_STORAGE_KEY_DEMO : LOCAL_STORAGE_KEY_LIVE;
+      localStorage.setItem(key, JSON.stringify(currentProj));
+
+      // Step 2: Supabase PostgreSQL cloud sync (does not trigger n8n)
+      if (user && !demoMode) {
+        await saveProjectToSupabase(currentProj, user.id);
       }
-      setIsAutosaving(false);
+
+      setAutosaveStatus('saved');
       setAutosaveTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    }, 500);
+    } catch (e) {
+      console.warn('Supabase autosave error:', e);
+      // Local work is preserved, flag failed status so user can click Retry
+      setAutosaveStatus('failed');
+    } finally {
+      setIsAutosaving(false);
+    }
+  };
+
+  // Debounced Autosave (1200ms delay)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      persistProject(project);
+    }, 1200);
     return () => clearTimeout(timer);
-  }, [project, demoMode]);
+  }, [project, demoMode, user]);
+
+  const retryAutosave = () => {
+    persistProject(project);
+  };
+
+  const openProjectById = async (projectId: string) => {
+    setIsLoadingProject(true);
+    try {
+      const targetUserId = user?.id || 'usr-architect-alpha-01';
+      const loaded = await fetchProjectById(projectId, targetUserId);
+      setProject(loaded);
+      localStorage.setItem(LOCAL_STORAGE_KEY_LIVE, JSON.stringify(loaded));
+      addToast('Project Opened', `Loaded "${loaded.identity.name}".`, 'success');
+    } catch (err: any) {
+      console.error('Failed to open project:', err);
+      addToast('Project Load Failed', err.message || 'Unable to retrieve project record.', 'error');
+      throw err;
+    } finally {
+      setIsLoadingProject(false);
+    }
+  };
 
   const addToast = (title: string, message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
     const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5);
@@ -618,7 +666,11 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         switchToLiveMode,
         resetDemo,
         isAutosaving,
+        autosaveStatus,
         autosaveTime,
+        retryAutosave,
+        openProjectById,
+        isLoadingProject,
         settingsOpen,
         setSettingsOpen,
         onboardingOpen,

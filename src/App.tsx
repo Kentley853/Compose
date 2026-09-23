@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { ProjectProvider, useProject } from './context/ProjectContext';
+import { AuthProvider } from './context/AuthContext';
+import { AuthModal } from './components/auth/AuthModal';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { GuidedWorkflowBar } from './components/layout/GuidedWorkflowBar';
@@ -11,6 +13,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 // Screens
 import { LandingScreen } from './components/screens/LandingScreen';
+import { ProjectsListScreen } from './components/screens/ProjectsListScreen';
 import { DashboardScreen } from './components/screens/DashboardScreen';
 import { ProjectSetupScreen } from './components/screens/ProjectSetupScreen';
 import { PlotIntelligenceScreen } from './components/screens/PlotIntelligenceScreen';
@@ -35,6 +38,8 @@ const MainAppContent: React.FC = () => {
 
   const renderActiveScreen = () => {
     switch (currentScreen) {
+      case 'projects':
+        return <ProjectsListScreen />;
       case 'dashboard':
         return <DashboardScreen />;
       case 'setup':
@@ -100,6 +105,9 @@ const MainAppContent: React.FC = () => {
       {/* Settings Modal */}
       <SettingsModal />
 
+      {/* Auth Modal (Sign In, Sign Up, Forgot Password) */}
+      <AuthModal />
+
       {/* Onboarding / Quick Guide Modal */}
       <OnboardingModal
         isOpen={guideOpen || onboardingOpen}
@@ -115,9 +123,11 @@ const MainAppContent: React.FC = () => {
 export default function App() {
   return (
     <ErrorBoundary fallbackTitle="Compose AI Application Error">
-      <ProjectProvider>
-        <MainAppContent />
-      </ProjectProvider>
+      <AuthProvider>
+        <ProjectProvider>
+          <MainAppContent />
+        </ProjectProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

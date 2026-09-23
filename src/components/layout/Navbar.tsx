@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useProject } from '../../context/ProjectContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   FolderOpen,
   ChevronDown,
@@ -13,6 +14,11 @@ import {
   Sparkles,
   ExternalLink,
   Menu,
+  User as UserIcon,
+  LogOut,
+  FolderKanban,
+  Database,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnboarding }) => {
@@ -26,7 +32,9 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
     presentationMode,
     togglePresentationMode,
     isAutosaving,
+    autosaveStatus,
     autosaveTime,
+    retryAutosave,
     regenerateDependentViews,
     setSettingsOpen,
     demoMode,
@@ -36,7 +44,10 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
     setMobileNavOpen,
   } = useProject();
 
+  const { user, openSignIn, signOut } = useAuth();
+
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const getStatusBadge = () => {
     if (project.dependentOutputsOutdated) {
@@ -61,6 +72,8 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
 
   const getScreenBreadcrumb = () => {
     switch (currentScreen) {
+      case 'projects':
+        return 'Projects Directory';
       case 'dashboard':
         return 'Project Dashboard';
       case 'setup':
@@ -159,6 +172,23 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
                 ))}
               </div>
 
+              {/* Direct Link to full Supabase Projects Dashboard */}
+              <div className="p-2 border-t border-[#E4E7EC] bg-white">
+                <button
+                  onClick={() => {
+                    setScreen('projects');
+                    setProjectMenuOpen(false);
+                  }}
+                  className="w-full py-1.5 px-2 rounded-lg text-xs font-semibold text-blue-600 hover:bg-blue-50 flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <FolderKanban className="w-3.5 h-3.5" />
+                    <span>Manage All Projects</span>
+                  </span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+
               <div className="p-2 border-t border-[#E4E7EC] bg-[#F9FAFB] flex items-center justify-between">
                 <span className="text-[11px] text-[#667085]">Operating Mode</span>
                 {demoMode ? (
@@ -221,15 +251,34 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
         )}
       </div>
 
-      {/* Right: Autosave status, Quick Guide, Presentation Mode, Settings */}
+      {/* Right: Autosave status, Quick Guide, Presentation Mode, Settings, Auth Profile */}
       <div className="flex items-center gap-2 sm:gap-2.5">
-        <div className="hidden xl:flex items-center gap-1.5 text-[11px] text-[#667085] font-mono">
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              isAutosaving ? 'bg-[#2563EB] animate-pulse' : 'bg-[#12B76A]'
-            }`}
-          />
-          <span>{isAutosaving ? 'Saving...' : `Autosaved ${autosaveTime}`}</span>
+        {/* Autosave Status Indicator */}
+        <div className="hidden xl:flex items-center gap-1.5 text-[11px] font-mono">
+          {autosaveStatus === 'saving' && (
+            <div className="flex items-center gap-1.5 text-blue-600">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              <span>Saving…</span>
+            </div>
+          )}
+          {autosaveStatus === 'saved' && (
+            <div className="flex items-center gap-1.5 text-[#667085]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#12B76A]" />
+              <span>Saved at {autosaveTime}</span>
+            </div>
+          )}
+          {autosaveStatus === 'failed' && (
+            <div className="flex items-center gap-1.5 text-rose-600">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+              <span>Save failed</span>
+              <button
+                onClick={retryAutosave}
+                className="ml-1 underline font-semibold text-rose-700 hover:text-rose-900"
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </div>
 
         {onOpenOnboarding && (
@@ -267,9 +316,86 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
           <Sliders className="w-4 h-4" />
         </button>
 
-        {/* User initials avatar */}
-        <div className="w-8 h-8 rounded-full bg-[#EEF4FF] border border-[#2563EB]/30 hidden xs:flex items-center justify-center text-xs font-bold text-[#2563EB]">
-          CA
+        {/* User Account / Profile Menu */}
+        <div className="relative">
+          {user ? (
+            <button
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
+              className="w-8 h-8 rounded-full bg-[#EEF4FF] hover:bg-[#D1E0FF] border border-[#2563EB]/30 flex items-center justify-center text-xs font-bold text-[#2563EB] transition-colors"
+              title={user.email || 'Architect Account'}
+            >
+              {(user.email ? user.email.slice(0, 2) : 'AR').toUpperCase()}
+            </button>
+          ) : (
+            <button
+              onClick={openSignIn}
+              className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1"
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sign In</span>
+            </button>
+          )}
+
+          {/* User Popover Dropdown */}
+          {userMenuOpen && user && (
+            <>
+              <div
+                className="fixed inset-0 z-20"
+                onClick={() => setUserMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-[#E4E7EC] rounded-xl shadow-xl z-30 overflow-hidden text-xs animate-in zoom-in-95 duration-100">
+                <div className="p-3 bg-[#F9FAFB] border-b border-[#E4E7EC]">
+                  <div className="font-semibold text-[#172033] truncate">
+                    {user.user_metadata?.full_name || 'Architect Studio'}
+                  </div>
+                  <div className="text-[11px] text-[#667085] truncate font-mono mt-0.5">
+                    {user.email}
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit">
+                    <Database className="w-3 h-3" />
+                    <span>Supabase Connected</span>
+                  </div>
+                </div>
+
+                <div className="p-1.5 space-y-0.5">
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      setScreen('projects');
+                    }}
+                    className="w-full px-2.5 py-2 text-left hover:bg-[#F2F4F7] rounded-lg flex items-center gap-2 text-[#344054] font-medium"
+                  >
+                    <FolderKanban className="w-4 h-4 text-blue-600" />
+                    <span>My Projects</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      setSettingsOpen(true);
+                    }}
+                    className="w-full px-2.5 py-2 text-left hover:bg-[#F2F4F7] rounded-lg flex items-center gap-2 text-[#344054]"
+                  >
+                    <Sliders className="w-4 h-4 text-[#667085]" />
+                    <span>Studio Settings</span>
+                  </button>
+                </div>
+
+                <div className="p-1.5 border-t border-[#E4E7EC]">
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      signOut();
+                    }}
+                    className="w-full px-2.5 py-2 text-left hover:bg-rose-50 rounded-lg flex items-center gap-2 text-rose-600 font-medium"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>

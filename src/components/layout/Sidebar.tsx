@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useProject } from '../../context/ProjectContext';
+import { useAuth } from '../../context/AuthContext';
 import { ScreenId } from '../../types/architecture';
 import {
   LayoutDashboard,
@@ -47,6 +48,7 @@ export const Sidebar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnb
     mobileNavOpen,
     setMobileNavOpen,
   } = useProject();
+  const { user, openSignIn } = useAuth();
 
   const [collapsed, setCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
@@ -66,7 +68,8 @@ export const Sidebar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnb
       title: 'Home',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'setup', label: 'Projects & Ingestion', icon: FolderKanban },
+        { id: 'projects', label: 'My Projects', icon: FolderKanban, badge: 'Supabase' },
+        { id: 'setup', label: 'Intake & Ingestion', icon: FolderKanban },
       ],
     },
     {
@@ -347,16 +350,45 @@ export const Sidebar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnb
           )}
 
           {!collapsed && (
-            <div className="pt-2 border-t border-[#E4E7EC] flex items-center justify-between">
-              <div className="min-w-0">
-                <div className="text-xs font-medium text-[#172033] truncate">
-                  {demoMode ? 'Jakarta Residence' : project.identity.name}
+            <div className="pt-2 border-t border-[#E4E7EC] space-y-2">
+              {user ? (
+                <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-[#E4E7EC]">
+                  <div className="min-w-0 pr-1">
+                    <div className="text-[11px] font-semibold text-[#172033] truncate">
+                      {user.user_metadata?.full_name || user.email?.split('@')[0]}
+                    </div>
+                    <div className="text-[10px] text-emerald-700 flex items-center gap-1 font-mono">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span>Supabase Sync</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setScreen('projects')}
+                    className="text-[10px] font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded"
+                  >
+                    Projects
+                  </button>
                 </div>
-                <div className="text-[10px] text-[#667085] flex items-center gap-1">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${demoMode ? 'bg-[#F79009]' : 'bg-[#12B76A]'}`}
-                  />
-                  <span>{demoMode ? 'Demo Project' : 'Live MVP'}</span>
+              ) : (
+                <button
+                  onClick={openSignIn}
+                  className="w-full py-1.5 px-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs transition-colors flex items-center justify-center gap-1"
+                >
+                  <span>Sign In with Supabase</span>
+                </button>
+              )}
+
+              <div className="flex items-center justify-between px-1">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-[#172033] truncate">
+                    {demoMode ? 'Jakarta Residence' : project.identity.name}
+                  </div>
+                  <div className="text-[10px] text-[#667085] flex items-center gap-1">
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${demoMode ? 'bg-[#F79009]' : 'bg-[#12B76A]'}`}
+                    />
+                    <span>{demoMode ? 'Demo Project' : 'Live MVP'}</span>
+                  </div>
                 </div>
               </div>
             </div>

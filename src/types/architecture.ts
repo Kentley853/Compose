@@ -1,5 +1,6 @@
 export type ScreenId =
   | 'landing'
+  | 'projects'
   | 'dashboard'
   | 'setup'
   | 'plot'
@@ -141,6 +142,8 @@ export interface UploadedFile {
   notes?: string;
   previewUrl?: string;
   textContent?: string;
+  storagePath?: string;
+  fileUrl?: string;
 }
 
 export interface RoomData {

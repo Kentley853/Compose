@@ -1,5 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { useProject } from '../../context/ProjectContext';
+import { useAuth } from '../../context/AuthContext';
+import {
+  uploadProjectFileToStorage,
+  getFileDownloadUrl,
+  deleteFileFromStorage,
+  isSupabaseConfigured,
+} from '../../services/supabase';
 import { UploadedFile, FileCategory, FileProcessingStatus } from '../../types/architecture';
 import {
   FolderArchive,
@@ -76,6 +83,7 @@ export const FilesScreen: React.FC = () => {
     deletedUploads,
     addToast,
   } = useProject();
+  const { user } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -97,32 +105,35 @@ export const FilesScreen: React.FC = () => {
   const [showTrash, setShowTrash] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
 
-  // File Upload handler with validation & simulated async progress
-  const handleFilesChosen = (fileList: FileList | null) => {
+  // File Upload handler with Supabase Storage upload, validation & progress
+  const handleFilesChosen = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    const targetUserId = user?.id || 'usr-architect-alpha-01';
 
     const newUploadedFiles: UploadedFile[] = [];
     const uploadTasks: Array<{ id: string; name: string; progress: number; size: string; error?: string }> = [];
 
-    Array.from(fileList).forEach((file) => {
+    const filesArray = Array.from(fileList);
+
+    for (const file of filesArray) {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
 
       // Validation 1: Empty file check
       if (file.size === 0) {
         addToast('Invalid File', `"${file.name}" is empty (0 bytes).`, 'error');
-        return;
+        continue;
       }
 
       // Validation 2: Max 25MB check
       if (file.size > 25 * 1024 * 1024) {
         addToast('File Too Large', `"${file.name}" exceeds the 25MB limit.`, 'error');
-        return;
+        continue;
       }
 
       // Validation 3: Supported extension check
       if (!ACCEPTED_EXTENSIONS.includes(ext)) {
         addToast('Unsupported Format', `Extension ${ext} is not supported.`, 'warning');
-        return;
+        continue;
       }
 
       // Auto-determine category & experimental badge
@@ -141,45 +152,56 @@ export const FilesScreen: React.FC = () => {
       uploadTasks.push({
         id: fileId,
         name: file.name,
-        progress: 15,
+        progress: 40,
         size: sizeStr,
       });
 
-      newUploadedFiles.push({
-        id: fileId,
-        name: file.name,
-        type: category,
-        category,
-        size: sizeStr,
-        sizeBytes: file.size,
-        uploadDate: 'Just now',
-        status: ['dwg', 'ifc', 'obj'].includes(ext.replace('.', '')) ? 'Needs review' : 'Ready',
-        extension: ext,
-        usedByRevision: project.activeRevision,
-        isExperimental: ['.dwg', '.ifc', '.obj'].includes(ext),
-        notes: file.name.includes('survey') ? 'Site boundary coordinates extracted.' : 'Document ingested for concept synthesis.',
-      });
-    });
+      try {
+        // Upload to private Supabase Storage: user_id/project_id/files/
+        const uploadResult = await uploadProjectFileToStorage(targetUserId, project.id, file);
+
+        newUploadedFiles.push({
+          id: fileId,
+          name: file.name,
+          type: category,
+          category,
+          size: uploadResult.sizeFormatted,
+          sizeBytes: uploadResult.sizeBytes,
+          uploadDate: 'Just now',
+          status: ['dwg', 'ifc', 'obj'].includes(ext.replace('.', '')) ? 'Needs review' : 'Ready',
+          extension: ext,
+          usedByRevision: project.activeRevision,
+          isExperimental: ['.dwg', '.ifc', '.obj'].includes(ext),
+          notes: file.name.includes('survey') ? 'Site boundary coordinates extracted.' : 'Document stored securely in Supabase.',
+          storagePath: uploadResult.storagePath,
+          fileUrl: uploadResult.signedUrl,
+          previewUrl: uploadResult.signedUrl,
+        });
+      } catch (err: any) {
+        console.warn('Storage upload fallback:', err);
+        const objUrl = URL.createObjectURL(file);
+        newUploadedFiles.push({
+          id: fileId,
+          name: file.name,
+          type: category,
+          category,
+          size: sizeStr,
+          sizeBytes: file.size,
+          uploadDate: 'Just now',
+          status: 'Ready',
+          extension: ext,
+          previewUrl: objUrl,
+          fileUrl: objUrl,
+        });
+      }
+    }
 
     if (uploadTasks.length > 0) {
-      setActiveUploads((prev) => [...prev, ...uploadTasks]);
-
-      // Progress animation
-      let currentProgress = 20;
-      const interval = setInterval(() => {
-        currentProgress += 25;
-        setActiveUploads((prev) =>
-          prev.map((t) => (uploadTasks.some((ut) => ut.id === t.id) ? { ...t, progress: Math.min(100, currentProgress) } : t))
-        );
-
-        if (currentProgress >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setActiveUploads((prev) => prev.filter((t) => !uploadTasks.some((ut) => ut.id === t.id)));
-            addUploads(newUploadedFiles);
-          }, 300);
-        }
-      }, 200);
+      setActiveUploads(uploadTasks);
+      setTimeout(() => {
+        setActiveUploads([]);
+        addUploads(newUploadedFiles);
+      }, 500);
     }
   };
 
@@ -199,32 +221,83 @@ export const FilesScreen: React.FC = () => {
     handleFilesChosen(e.dataTransfer.files);
   };
 
-  const handleReplaceFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReplaceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!replacingFileId || !e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
+    const targetUserId = user?.id || 'usr-architect-alpha-01';
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-    const sizeStr = file.size > 1024 * 1024
-      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-      : `${Math.round(file.size / 1024)} KB`;
-
     const old = project.uploads.find((f) => f.id === replacingFileId);
     if (!old) return;
 
-    const replaced: UploadedFile = {
-      ...old,
-      name: file.name,
-      size: sizeStr,
-      uploadDate: 'Just now',
-      extension: ext,
-      notes: `Replaced previous file on ${new Date().toLocaleDateString()}`,
-    };
+    try {
+      const uploadResult = await uploadProjectFileToStorage(targetUserId, project.id, file);
+      const replaced: UploadedFile = {
+        ...old,
+        name: file.name,
+        size: uploadResult.sizeFormatted,
+        sizeBytes: uploadResult.sizeBytes,
+        uploadDate: 'Just now',
+        extension: ext,
+        notes: `Replaced file on ${new Date().toLocaleDateString()}`,
+        storagePath: uploadResult.storagePath,
+        fileUrl: uploadResult.signedUrl,
+        previewUrl: uploadResult.signedUrl,
+      };
 
-    replaceUpload(replacingFileId, replaced);
-    setReplacingFileId(null);
+      replaceUpload(replacingFileId, replaced);
+    } catch {
+      const sizeStr = file.size > 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.round(file.size / 1024)} KB`;
+      const replaced: UploadedFile = {
+        ...old,
+        name: file.name,
+        size: sizeStr,
+        uploadDate: 'Just now',
+        extension: ext,
+        notes: `Replaced file on ${new Date().toLocaleDateString()}`,
+      };
+      replaceUpload(replacingFileId, replaced);
+    } finally {
+      setReplacingFileId(null);
+    }
   };
 
-  const handleDownloadFile = (file: UploadedFile) => {
-    // Produce mock content or SVG/Text based on file type
+  const handleDownloadFile = async (file: UploadedFile) => {
+    // 1. If stored in Supabase private bucket, request fresh signed URL
+    if (file.storagePath) {
+      try {
+        const signedUrl = await getFileDownloadUrl(file.storagePath);
+        if (signedUrl && signedUrl !== '#') {
+          const a = document.createElement('a');
+          a.href = signedUrl;
+          a.download = file.name;
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          addToast('Signed Download', `Downloading "${file.name}" via secure signed URL.`, 'success');
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Signed URL request failed, falling back:', err);
+      }
+    }
+
+    // 2. If objectUrl or direct URL available
+    if (file.fileUrl && !file.fileUrl.startsWith('#')) {
+      const a = document.createElement('a');
+      a.href = file.fileUrl;
+      a.download = file.name;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      addToast('Download Started', `Saved "${file.name}".`, 'info');
+      return;
+    }
+
+    // 3. Fallback to format generator
     if (file.name.endsWith('.svg')) {
       downloadText(generatePlanSVG(project), file.name, 'image/svg+xml');
     } else if (file.name.endsWith('.csv')) {
