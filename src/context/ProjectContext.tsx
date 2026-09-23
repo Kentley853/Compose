@@ -151,6 +151,8 @@ interface ProjectContextType {
   setSettingsOpen: (open: boolean) => void;
   onboardingOpen: boolean;
   setOnboardingOpen: (open: boolean) => void;
+  mobileNavOpen: boolean;
+  setMobileNavOpen: (open: boolean) => void;
   // File management
   deletedUploads: UploadedFile[];
   addUploads: (files: UploadedFile[]) => void;
@@ -210,6 +212,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [autosaveTime, setAutosaveTime] = useState<string>('Just now');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
 
   // Autosave to appropriate key
   useEffect(() => {
@@ -620,6 +623,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setSettingsOpen,
         onboardingOpen,
         setOnboardingOpen,
+        mobileNavOpen,
+        setMobileNavOpen,
         deletedUploads,
         addUploads,
         removeUpload,

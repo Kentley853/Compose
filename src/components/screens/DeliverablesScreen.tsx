@@ -97,13 +97,13 @@ export const DeliverablesScreen: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
             {/* Primary Action: Export Client Presentation PDF */}
             <button
               id="btn-export-presentation-pdf"
               onClick={handleExportPDF}
               disabled={isExportingPDF}
-              className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-2"
+              className="px-4 py-2 min-h-[44px] rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-2"
             >
               <FileDown className="w-4 h-4" />
               <span>{isExportingPDF ? 'Generating PDF...' : 'Export Presentation PDF'}</span>
@@ -111,17 +111,17 @@ export const DeliverablesScreen: React.FC = () => {
 
             <button
               onClick={handleExportJSON}
-              className="px-3.5 py-2 rounded-lg border border-[#E4E7EC] bg-white hover:bg-[#F9FAFB] text-xs font-medium text-[#172033] flex items-center gap-1.5 transition-colors shadow-xs"
+              className="px-3.5 py-2 min-h-[44px] rounded-lg border border-[#E4E7EC] bg-white hover:bg-[#F9FAFB] text-xs font-medium text-[#172033] flex items-center gap-1.5 transition-colors shadow-xs"
             >
-              <FileText className="w-3.5 h-3.5 text-[#2563EB]" />
+              <FileText className="w-4 h-4 text-[#2563EB]" />
               <span>Export JSON</span>
             </button>
 
             <button
               onClick={togglePresentationMode}
-              className="px-3.5 py-2 rounded-lg border border-[#E4E7EC] bg-white hover:bg-[#F9FAFB] text-xs font-medium text-[#172033] flex items-center gap-1.5 transition-colors shadow-xs"
+              className="px-3.5 py-2 min-h-[44px] rounded-lg border border-[#E4E7EC] bg-white hover:bg-[#F9FAFB] text-xs font-medium text-[#172033] flex items-center gap-1.5 transition-colors shadow-xs"
             >
-              <Play className="w-3.5 h-3.5 text-[#2563EB] fill-current" />
+              <Play className="w-4 h-4 text-[#2563EB] fill-current" />
               <span>Live Walkthrough</span>
             </button>
           </div>

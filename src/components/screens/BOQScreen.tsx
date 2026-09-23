@@ -125,22 +125,22 @@ export const BOQScreen: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleExportCSV}
-              className="px-3.5 py-1.5 rounded-lg border border-[#E4E7EC] bg-white hover:bg-[#F9FAFB] text-xs font-medium text-[#172033] flex items-center gap-1.5 transition-colors"
+              className="px-3.5 py-2 min-h-[44px] rounded-lg border border-[#E4E7EC] bg-white hover:bg-[#F9FAFB] text-xs font-medium text-[#172033] flex items-center gap-1.5 transition-colors"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-[#027A48]" />
+              <FileSpreadsheet className="w-4 h-4 text-[#027A48]" />
               <span>Export CSV (USD)</span>
             </button>
 
             <button
               id="btn-goto-deliverables-from-boq"
               onClick={() => setScreen('deliverables')}
-              className="px-4 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 min-h-[44px] rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-1.5"
             >
               <span>Export Deliverables Deck</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>

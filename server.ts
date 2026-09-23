@@ -1,16 +1,17 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
-// API health endpoint
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -18,6 +19,48 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     hasGeminiKey: !!process.env.GEMINI_API_KEY,
   });
+});
+
+// n8n Webhook Proxy Endpoint to prevent browser CORS issues
+app.post('/api/submit-n8n', async (req, res) => {
+  const webhookUrl = process.env.VITE_N8N_SUBMIT_WEBHOOK_URL || 'https://droppflowwsystems.app.n8n.cloud/webhook/compose-submit';
+  try {
+    const upstreamRes = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(req.body),
+    });
+
+    const responseText = await upstreamRes.text();
+    let responseData;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch {
+      responseData = { message: responseText || 'Received by n8n webhook' };
+    }
+
+    if (!upstreamRes.ok) {
+      return res.status(upstreamRes.status).json({
+        error: `n8n upstream error (${upstreamRes.status})`,
+        details: responseData,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: responseData,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Error forwarding to n8n webhook:', error);
+    res.status(500).json({
+      error: 'Failed to contact n8n backend automation',
+      message: error?.message || 'Network timeout or upstream failure',
+    });
+  }
 });
 
 // API config status endpoint
@@ -158,15 +201,28 @@ Based on the 60 ft × 120 ft parcel in Austin, Texas:
 
 // Vite middleware / static files
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+  const distPath = path.join(process.cwd(), 'dist');
+  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+  const isDev = process.env.NODE_ENV === 'development' || (!hasDist && process.env.NODE_ENV !== 'production');
+
+  if (isDev) {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (err) {
+      console.warn('Vite dev middleware initialization skipped or failed:', err);
+      if (hasDist) {
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      }
+    }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -174,7 +230,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Compose AI Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Compose AI Server running on http://0.0.0.0:${PORT} (PID: ${process.pid})`);
   });
 }
 
