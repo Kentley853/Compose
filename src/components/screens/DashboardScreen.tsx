@@ -25,6 +25,8 @@ import {
   History,
   Sparkles,
   HelpCircle,
+  Database,
+  FolderKanban,
 } from 'lucide-react';
 import { HelpTooltip } from '../common/HelpTooltip';
 
@@ -32,11 +34,9 @@ export const DashboardScreen: React.FC = () => {
   const {
     project,
     setScreen,
-    availableProjects,
-    selectProject,
-    demoMode,
-    switchToDemoMode,
-    switchToLiveMode,
+    companyProjects,
+    autosaveStatus,
+    autosaveTime,
   } = useProject();
 
   const getStageBadge = (status: StageStatus) => {
@@ -101,11 +101,11 @@ export const DashboardScreen: React.FC = () => {
       case 'coordinated3d':
         return <Box className="w-4 h-4 text-[#2563EB]" />;
       case 'compliance':
-        return <ShieldAlert className="w-4 h-4 text-[#F04438]" />;
+        return <ShieldAlert className="w-4 h-4 text-[#D92D20]" />;
       case 'boq':
-        return <Calculator className="w-4 h-4 text-[#027A48]" />;
+        return <Calculator className="w-4 h-4 text-[#12B76A]" />;
       case 'deliverables':
-        return <FileSpreadsheet className="w-4 h-4 text-[#2563EB]" />;
+        return <FileSpreadsheet className="w-4 h-4 text-[#7A5AF8]" />;
       default:
         return <Layers className="w-4 h-4 text-[#667085]" />;
     }
@@ -114,55 +114,35 @@ export const DashboardScreen: React.FC = () => {
   return (
     <div className="flex-1 bg-[#F7F8FA] overflow-y-auto min-h-screen">
       <div className="max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-6">
-        {/* Top Mode Notice Card */}
+        {/* Top Permanent Database Status Card */}
         <div className="bg-white border border-[#E4E7EC] rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div
-              className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                demoMode ? 'bg-[#FFF4ED] text-[#B54708]' : 'bg-[#ECFDF3] text-[#027A48]'
-              }`}
-            >
-              <Sparkles className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <Database className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-[#172033]">
-                  {demoMode ? 'Sample Walkthrough: Jakarta Urban Residence' : 'Live MVP Workspace'}
+                  Supabase Permanent Database & Storage
                 </span>
-                <span
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold ${
-                    demoMode
-                      ? 'bg-[#FFF4ED] text-[#B54708] border border-[#FECDCA]'
-                      : 'bg-[#ECFDF3] text-[#027A48] border border-[#ABEFC6]'
-                  }`}
-                >
-                  {demoMode ? 'DEMO MODE' : 'LIVE DATA'}
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold bg-[#ECFDF3] text-[#027A48] border border-[#ABEFC6]">
+                  ONLINE
                 </span>
               </div>
               <p className="text-xs text-[#667085] mt-0.5">
-                {demoMode
-                  ? 'Pre-populated with real plot coordinates, architectural chat context, 2D/3D layouts, and BOQ items.'
-                  : 'Your live architectural project. All changes persist automatically in browser storage.'}
+                Every floor plan, 3D model, BOQ, and uploaded file is saved permanently. Local work is backed up continuously.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {demoMode ? (
-              <button
-                onClick={switchToLiveMode}
-                className="px-3 py-1.5 rounded-lg border border-[#E4E7EC] hover:bg-[#F9FAFB] text-xs font-semibold text-[#2563EB] transition-colors"
-              >
-                Switch to Live MVP
-              </button>
-            ) : (
-              <button
-                onClick={switchToDemoMode}
-                className="px-3 py-1.5 rounded-lg border border-[#FECDCA] bg-[#FFF4ED] hover:bg-[#FEE4E2] text-xs font-semibold text-[#B54708] transition-colors"
-              >
-                Load Demo Project
-              </button>
-            )}
+            <button
+              onClick={() => setScreen('projects')}
+              className="px-3 py-1.5 rounded-lg border border-[#E4E7EC] hover:bg-[#F9FAFB] text-xs font-semibold text-[#2563EB] flex items-center gap-1.5 transition-colors"
+            >
+              <FolderKanban className="w-3.5 h-3.5" />
+              <span>All Projects ({companyProjects.length})</span>
+            </button>
           </div>
         </div>
 
@@ -177,7 +157,7 @@ export const DashboardScreen: React.FC = () => {
               <span className="font-medium">{project.identity.buildingType}</span>
             </div>
 
-            <h1 className="text-fluid-xl font-bold tracking-tight text-[#172033] flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172033] flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <span className="break-words">{project.identity.name}</span>
               <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-[#EEF4FF] text-[#2563EB] border border-[#2563EB]/20 whitespace-nowrap">
                 {project.activeRevision}
@@ -185,7 +165,7 @@ export const DashboardScreen: React.FC = () => {
             </h1>
 
             <p className="text-xs text-[#667085] mt-2 max-w-2xl leading-relaxed">
-              Coordinated concept study: 2-storey tropical residence with high thermal performance, integrated courtyard ventilation, and DKI Jakarta Pergub zoning compliance.
+              Coordinated architectural workspace: site parameters, spatial briefing, 2D drawings, zero-latency 3D massing, code verification, and deterministic BOQ estimation.
             </p>
           </div>
 
@@ -195,7 +175,7 @@ export const DashboardScreen: React.FC = () => {
               className="px-3.5 py-2 rounded-lg border border-[#E4E7EC] hover:bg-[#F9FAFB] text-xs font-semibold text-[#172033] flex items-center justify-center gap-1.5 transition-colors"
             >
               <FolderOpen className="w-4 h-4 text-[#2563EB]" />
-              <span>Files Workspace</span>
+              <span>Files Workspace ({project.uploads.length})</span>
             </button>
 
             <button
@@ -203,13 +183,13 @@ export const DashboardScreen: React.FC = () => {
               onClick={handleContinue}
               className="px-5 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-2"
             >
-              <span>Continue Design Workflow</span>
+              <span>Continue Workflow</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* 4 Clean Metric Cards */}
+        {/* 4 Metric Cards */}
         <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
           <div className="p-4 rounded-xl bg-white border border-[#E4E7EC] shadow-xs">
             <div className="text-xs text-[#667085] font-medium">Site Land Area</div>
@@ -217,7 +197,7 @@ export const DashboardScreen: React.FC = () => {
               {project.plot.area} <span className="text-sm font-normal text-[#667085]">m²</span>
             </div>
             <div className="text-[11px] text-[#667085] mt-0.5">
-              {project.plot.width}m × {project.plot.depth}m rectangular
+              {project.plot.width}m × {project.plot.depth}m parcel
             </div>
           </div>
 
@@ -227,7 +207,7 @@ export const DashboardScreen: React.FC = () => {
               284 <span className="text-sm font-normal text-[#667085]">m²</span>
             </div>
             <div className="text-[11px] text-[#12B76A] mt-0.5 font-medium">
-              KLB 0.95 (within 1.2 limit)
+              FAR 0.95 (compliant)
             </div>
           </div>
 
@@ -293,7 +273,7 @@ export const DashboardScreen: React.FC = () => {
                       {stage.screenId === 'floorplan' && 'Interactive room editor, alternatives evaluation'}
                       {stage.screenId === 'coordinated2d' && 'Structural grid, dimension strings, door & window schedule'}
                       {stage.screenId === 'coordinated3d' && 'Interactive 3D WebGL massing & sun study'}
-                      {stage.screenId === 'compliance' && 'Preliminary Jakarta Pergub & IBC code verification'}
+                      {stage.screenId === 'compliance' && 'Preliminary building code & zoning checks'}
                       {stage.screenId === 'boq' && 'Quantity takeoff schedule & cost forecasting'}
                       {stage.screenId === 'deliverables' && 'Architectural brief, drawings, and ZIP export'}
                     </div>
@@ -319,9 +299,9 @@ export const DashboardScreen: React.FC = () => {
               <FolderOpen className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-xs font-bold text-[#172033]">Files & Documents</div>
+              <div className="text-xs font-bold text-[#172033]">Files & Cloud Storage</div>
               <p className="text-[11px] text-[#667085] mt-0.5">
-                {project.uploads.length} attached site plans and surveys.
+                {project.uploads.length} attached site plans, drawings, and models.
               </p>
             </div>
           </button>

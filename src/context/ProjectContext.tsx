@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ScreenId,
   ProjectData,
@@ -12,8 +12,19 @@ import {
   FileCategory,
 } from '../types/architecture';
 import { INITIAL_JAKARTA_PROJECT, SAMPLE_PROJECTS_LIST } from '../data/sampleProjects';
-import { useAuth } from './AuthContext';
-import { saveProjectToSupabase, fetchProjectById } from '../services/supabase';
+import {
+  fetchCompanyProjects,
+  fetchProjectById,
+  saveProjectToSupabase,
+  createNewProjectInSupabase,
+  renameProjectInSupabase,
+  setProjectStatusInSupabase,
+  duplicateProjectInSupabase,
+  deleteProjectFromSupabase,
+  deleteFileFromSupabase,
+  ProjectSummary,
+  isSupabaseConfigured,
+} from '../services/supabase';
 
 export interface ToastMessage {
   id: string;
@@ -108,9 +119,16 @@ interface ProjectContextType {
   currentScreen: ScreenId;
   setScreen: (screen: ScreenId) => void;
   project: ProjectData;
-  availableProjects: ProjectData[];
+  companyProjects: ProjectSummary[];
+  isLoadingProjects: boolean;
+  loadAllProjects: () => Promise<void>;
+  openProjectById: (projectId: string) => Promise<void>;
+  createNewProject: (name?: string, location?: string, projectType?: string) => Promise<void>;
+  renameProject: (projectId: string, newName: string) => Promise<void>;
+  archiveProject: (projectId: string, status: 'active' | 'archived') => Promise<void>;
+  duplicateProject: (projectId: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
   selectProject: (projectId: string) => void;
-  createNewProject: (name?: string, location?: string) => void;
   updatePlot: (plotUpdates: Partial<PlotData>) => void;
   updateRequirements: (reqUpdates: any) => void;
   updateBrief: (briefUpdates: Partial<ArchitecturalBrief>) => void;
@@ -142,17 +160,11 @@ interface ProjectContextType {
   nextPresentationStep: () => void;
   prevPresentationStep: () => void;
   goToPresentationStep: (step: number) => void;
-  demoMode: boolean;
-  setDemoMode: (enabled: boolean) => void;
-  switchToDemoMode: () => void;
-  switchToLiveMode: () => void;
-  resetDemo: () => void;
   isAutosaving: boolean;
   autosaveStatus: 'idle' | 'saving' | 'saved' | 'failed';
   autosaveTime: string;
   retryAutosave: () => void;
-  openProjectById: (projectId: string) => Promise<void>;
-  isLoadingProject: boolean;
+  saveCurrentProjectNow: () => Promise<void>;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
   onboardingOpen: boolean;
@@ -171,30 +183,28 @@ interface ProjectContextType {
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY_LIVE = 'compose_ai_live_project_state_v2';
-const LOCAL_STORAGE_KEY_DEMO = 'compose_ai_demo_project_state_v2';
+const ACTIVE_PROJECT_ID_STORAGE_KEY = 'compose_ai_active_project_id';
+const LOCAL_STORAGE_KEY_BACKUP = 'compose_ai_active_project_backup_v2';
 
 export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('dashboard');
-  const [availableProjects] = useState<ProjectData[]>(SAMPLE_PROJECTS_LIST);
-  const [demoMode, setDemoMode] = useState<boolean>(false); // Default to Live MVP mode
+  const [companyProjects, setCompanyProjects] = useState<ProjectSummary[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState<boolean>(true);
 
-  // Load project state based on mode
+  // Initialize active project from local backup or default
   const [project, setProject] = useState<ProjectData>(() => {
     try {
-      const liveSaved = localStorage.getItem(LOCAL_STORAGE_KEY_LIVE);
-      if (liveSaved) {
-        return JSON.parse(liveSaved);
+      const cached = localStorage.getItem(LOCAL_STORAGE_KEY_BACKUP);
+      if (cached) {
+        return JSON.parse(cached);
       }
-    } catch (e) {
-      console.warn('Failed to parse localStorage project:', e);
-    }
-    // Default initial project for Live MVP
+    } catch {}
     return {
       ...INITIAL_JAKARTA_PROJECT,
-      id: 'proj-live-01',
+      id: 'proj-company-alpha-01',
       identity: {
         ...INITIAL_JAKARTA_PROJECT.identity,
+        id: 'proj-company-alpha-01',
         name: 'Austin Modern Residence',
         clientName: 'Client Project Alpha',
         location: 'Austin, Texas',
@@ -213,72 +223,15 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [wasteFactor, setWasteFactor] = useState<number>(8);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);
-  const { user } = useAuth();
   const [presentationStep, setPresentationStep] = useState<number>(1);
   const [isAutosaving, setIsAutosaving] = useState<boolean>(false);
   const [autosaveStatus, setAutosaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('saved');
   const [autosaveTime, setAutosaveTime] = useState<string>('Just now');
-  const [isLoadingProject, setIsLoadingProject] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
 
-  // Core save executor
-  const persistProject = async (currentProj: ProjectData) => {
-    setIsAutosaving(true);
-    setAutosaveStatus('saving');
-
-    try {
-      // Step 1: Immediate local storage preservation (offline resilience)
-      const key = demoMode ? LOCAL_STORAGE_KEY_DEMO : LOCAL_STORAGE_KEY_LIVE;
-      localStorage.setItem(key, JSON.stringify(currentProj));
-
-      // Step 2: Supabase PostgreSQL cloud sync (does not trigger n8n)
-      if (user && !demoMode) {
-        await saveProjectToSupabase(currentProj, user.id);
-      }
-
-      setAutosaveStatus('saved');
-      setAutosaveTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    } catch (e) {
-      console.warn('Supabase autosave error:', e);
-      // Local work is preserved, flag failed status so user can click Retry
-      setAutosaveStatus('failed');
-    } finally {
-      setIsAutosaving(false);
-    }
-  };
-
-  // Debounced Autosave (1200ms delay)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      persistProject(project);
-    }, 1200);
-    return () => clearTimeout(timer);
-  }, [project, demoMode, user]);
-
-  const retryAutosave = () => {
-    persistProject(project);
-  };
-
-  const openProjectById = async (projectId: string) => {
-    setIsLoadingProject(true);
-    try {
-      const targetUserId = user?.id || 'usr-architect-alpha-01';
-      const loaded = await fetchProjectById(projectId, targetUserId);
-      setProject(loaded);
-      localStorage.setItem(LOCAL_STORAGE_KEY_LIVE, JSON.stringify(loaded));
-      addToast('Project Opened', `Loaded "${loaded.identity.name}".`, 'success');
-    } catch (err: any) {
-      console.error('Failed to open project:', err);
-      addToast('Project Load Failed', err.message || 'Unable to retrieve project record.', 'error');
-      throw err;
-    } finally {
-      setIsLoadingProject(false);
-    }
-  };
-
-  const addToast = (title: string, message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+  const addToast = useCallback((title: string, message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
     const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5);
     const newToast: ToastMessage = {
       id,
@@ -289,105 +242,215 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     setToasts((prev) => [newToast, ...prev.slice(0, 4)]);
     setTimeout(() => {
-      removeToast(id);
+      setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
-  };
+  }, []);
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const switchToDemoMode = () => {
-    setDemoMode(true);
+  // 1. Initial Load: Fetch all saved company projects from Supabase when the app opens
+  const loadAllProjects = useCallback(async () => {
+    setIsLoadingProjects(true);
     try {
-      const demoSaved = localStorage.getItem(LOCAL_STORAGE_KEY_DEMO);
-      if (demoSaved) {
-        setProject(JSON.parse(demoSaved));
-      } else {
-        setProject(JSON.parse(JSON.stringify(INITIAL_JAKARTA_PROJECT)));
+      const list = await fetchCompanyProjects();
+      setCompanyProjects(list);
+
+      // Check if user previously opened a specific project
+      const lastOpenedId = localStorage.getItem(ACTIVE_PROJECT_ID_STORAGE_KEY);
+      if (lastOpenedId) {
+        const found = list.find((p) => p.id === lastOpenedId);
+        if (found) {
+          const loaded = await fetchProjectById(lastOpenedId);
+          setProject(loaded);
+          localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(loaded));
+          return;
+        }
       }
-    } catch {
-      setProject(JSON.parse(JSON.stringify(INITIAL_JAKARTA_PROJECT)));
+
+      // If no last-opened or not found, load the top project from Supabase
+      if (list.length > 0) {
+        const loaded = await fetchProjectById(list[0].id);
+        setProject(loaded);
+        localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(loaded));
+        localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, loaded.id);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load company projects:', err);
+    } finally {
+      setIsLoadingProjects(false);
     }
-    addToast('Demo Mode Activated', 'Viewing sample project: Austin Contemporary Residence.', 'info');
+  }, []);
+
+  useEffect(() => {
+    loadAllProjects();
+  }, [loadAllProjects]);
+
+  // Keep active project ID stored in localStorage so refresh stays on this project
+  useEffect(() => {
+    if (project?.id) {
+      localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
+      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(project));
+    }
+  }, [project]);
+
+  // 2. Autosave: Automatically save changes after a short delay (1200ms)
+  const saveCurrentProjectNow = useCallback(async () => {
+    setIsAutosaving(true);
+    setAutosaveStatus('saving');
+    try {
+      // Offline local preservation
+      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(project));
+
+      // Supabase PostgreSQL permanent persistence (no duplicate records)
+      await saveProjectToSupabase(project);
+
+      setAutosaveStatus('saved');
+      setAutosaveTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } catch (e: any) {
+      console.warn('Autosave failed:', e);
+      // Local work is preserved, flag failed status so user can click Retry
+      setAutosaveStatus('failed');
+    } finally {
+      setIsAutosaving(false);
+    }
+  }, [project]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveCurrentProjectNow();
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [project, saveCurrentProjectNow]);
+
+  const retryAutosave = () => {
+    saveCurrentProjectNow();
   };
 
-  const switchToLiveMode = () => {
-    setDemoMode(false);
+  // Open existing project from Supabase
+  const openProjectById = async (projectId: string) => {
+    setIsLoadingProjects(true);
     try {
-      const liveSaved = localStorage.getItem(LOCAL_STORAGE_KEY_LIVE);
-      if (liveSaved) {
-        setProject(JSON.parse(liveSaved));
-      }
-    } catch (e) {
-      console.warn('Failed to load live project:', e);
+      const loaded = await fetchProjectById(projectId);
+      setProject(loaded);
+      localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, loaded.id);
+      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(loaded));
+      setCurrentScreen('dashboard');
+      addToast('Project Opened', `Loaded "${loaded.identity.name}". All fields restored.`, 'success');
+    } catch (err: any) {
+      console.error('Failed to open project:', err);
+      addToast('Open Failed', err.message || 'Could not load project from Supabase.', 'error');
+      throw err;
+    } finally {
+      setIsLoadingProjects(false);
     }
-    addToast('Live MVP Mode', 'Switched to your active workspace.', 'success');
   };
 
+  // Switch project from top dropdown
   const selectProject = (projectId: string) => {
-    const found = availableProjects.find((p) => p.id === projectId);
-    if (found) {
-      setProject(JSON.parse(JSON.stringify(found)));
-      addToast('Project Switched', `Active workspace: ${found.identity.name}`, 'info');
+    openProjectById(projectId);
+  };
+
+  // Create new project in Supabase
+  const createNewProject = async (
+    name: string = 'Untitled Architectural Project',
+    location: string = 'Austin, Texas',
+    projectType: string = 'Single-family residential'
+  ) => {
+    setIsLoadingProjects(true);
+    try {
+      const created = await createNewProjectInSupabase(name, location, projectType);
+      setProject(created);
+      localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, created.id);
+      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(created));
+      setCurrentScreen('setup');
+      addToast('Project Created', `Initialized "${created.identity.name}".`, 'success');
+      await loadAllProjects();
+    } catch (err: any) {
+      console.error('Failed to create project:', err);
+      addToast('Creation Error', err.message || 'Could not create project.', 'error');
+    } finally {
+      setIsLoadingProjects(false);
     }
   };
 
-  const createNewProject = (name: string = 'Untitled Concept Residence', location: string = 'Austin, Texas') => {
-    const newId = `proj-${Date.now()}`;
-    const newProj: ProjectData = {
-      ...INITIAL_JAKARTA_PROJECT,
-      id: newId,
-      identity: {
-        id: newId,
-        name,
-        clientName: 'Private Client',
-        location,
-        buildingType: 'Contemporary Single-Family Residence',
-        description: 'Conceptual architectural design',
-        leadArchitect: 'Atelier Studio Lead',
-        projectType: 'Contemporary Residence',
-        createdDate: new Date().toLocaleDateString(),
-        lastModified: 'Just now',
-        currentRevision: 'REV-01',
-      },
-      activeRevision: 'REV-01',
-      uploads: [],
-      revisions: [
-        {
-          id: `rev-${Date.now()}`,
-          code: 'REV-01',
-          timestamp: 'Just now',
-          author: 'Studio Architect',
-          summary: 'Initial project setup & plot definition',
-          type: 'plot',
-        },
-      ],
-      dependentOutputsOutdated: false,
-    };
-    setProject(newProj);
-    setDemoMode(false);
-    setCurrentScreen('setup');
-    addToast('New Project Created', `Initialized "${name}" in Live MVP Mode.`, 'success');
+  // Rename project in Supabase
+  const renameProject = async (projectId: string, newName: string) => {
+    try {
+      await renameProjectInSupabase(projectId, newName);
+      if (project.id === projectId) {
+        setProject((prev) => ({
+          ...prev,
+          identity: {
+            ...prev.identity,
+            name: newName,
+          },
+        }));
+      }
+      await loadAllProjects();
+      addToast('Project Renamed', `Project title updated to "${newName}".`, 'info');
+    } catch (err: any) {
+      addToast('Rename Failed', err.message || 'Could not rename project.', 'error');
+    }
   };
 
-  const updatePlot = (plotUpdates: Partial<PlotData>) => {
-    setProject((prev) => {
-      const newPlot = { ...prev.plot, ...plotUpdates };
-      newPlot.area = Number((newPlot.width * newPlot.depth).toFixed(1));
-      newPlot.perimeter = 2 * (newPlot.width + newPlot.depth);
-      const effWidth = Math.max(0, newPlot.width - (newPlot.setbacks.left + newPlot.setbacks.right));
-      const effDepth = Math.max(0, newPlot.depth - (newPlot.setbacks.front + newPlot.setbacks.rear));
-      newPlot.buildableArea = Number((effWidth * effDepth).toFixed(1));
-      newPlot.coverageRatio = Number((newPlot.buildableArea / newPlot.area).toFixed(2));
+  // Archive or unarchive project
+  const archiveProject = async (projectId: string, status: 'active' | 'archived') => {
+    try {
+      await setProjectStatusInSupabase(projectId, status);
+      await loadAllProjects();
+      addToast(
+        status === 'archived' ? 'Project Archived' : 'Project Restored',
+        status === 'archived' ? 'Project moved to archive.' : 'Project marked as active.',
+        'info'
+      );
+    } catch (err: any) {
+      addToast('Action Failed', err.message, 'error');
+    }
+  };
 
-      return {
-        ...prev,
-        plot: newPlot,
-        dependentOutputsOutdated: true,
-      };
-    });
-    addToast('Plot Updated', 'Boundaries & setbacks recalculated.', 'info');
+  // Duplicate project in Supabase
+  const duplicateProject = async (projectId: string) => {
+    try {
+      const duplicated = await duplicateProjectInSupabase(projectId);
+      await loadAllProjects();
+      addToast('Project Duplicated', `Created copy "${duplicated.identity.name}".`, 'success');
+    } catch (err: any) {
+      addToast('Duplicate Failed', err.message, 'error');
+    }
+  };
+
+  // Delete project from Supabase permanently after confirmation
+  const deleteProject = async (projectId: string) => {
+    try {
+      await deleteProjectFromSupabase(projectId);
+      addToast('Project Deleted', 'Project removed from company database.', 'info');
+      await loadAllProjects();
+      // If deleted current project, open another
+      const remaining = companyProjects.filter((p) => p.id !== projectId);
+      if (remaining.length > 0) {
+        await openProjectById(remaining[0].id);
+      }
+    } catch (err: any) {
+      addToast('Delete Failed', err.message, 'error');
+    }
+  };
+
+  // Model & State Mutators
+  const updatePlot = (plotUpdates: Partial<PlotData>) => {
+    setProject((prev) => ({
+      ...prev,
+      plot: { ...prev.plot, ...plotUpdates },
+      dependentOutputsOutdated: true,
+      workflow: prev.workflow.map((w) =>
+        ['coordinated2d', 'coordinated3d', 'compliance', 'boq'].includes(w.screenId)
+          ? { ...w, status: 'outdated' }
+          : w
+      ),
+    }));
+    addToast('Site Geometry Updated', 'Setbacks and boundary recalculated.', 'info');
   };
 
   const updateRequirements = (reqUpdates: any) => {
@@ -396,7 +459,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       requirements: { ...prev.requirements, ...reqUpdates },
       dependentOutputsOutdated: true,
     }));
-    addToast('Requirements Saved', 'Project requirements modified.', 'info');
+    addToast('Requirements Saved', 'Design program parameters refreshed.', 'info');
   };
 
   const updateBrief = (briefUpdates: Partial<ArchitecturalBrief>) => {
@@ -404,28 +467,16 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...prev,
       brief: { ...prev.brief, ...briefUpdates },
     }));
-    addToast('Brief Updated', 'Modifications recorded in design brief.', 'info');
+    addToast('Design Brief Updated', 'Spatial guidelines synchronized.', 'info');
   };
 
   const updateRoom = (roomId: string, updates: Partial<RoomData>) => {
     setProject((prev) => {
-      const updatedAlternatives = prev.alternatives.map((alt) => {
+      const newAlternatives = prev.alternatives.map((alt) => {
         if (alt.id === prev.activeAlternativeId) {
-          const updatedRooms = alt.rooms.map((r) => {
-            if (r.id === roomId) {
-              const merged = { ...r, ...updates };
-              if (updates.width !== undefined || updates.height !== undefined) {
-                merged.area = Number((merged.width * merged.height).toFixed(2));
-              }
-              return merged;
-            }
-            return r;
-          });
-          const totalGross = Number(updatedRooms.reduce((acc, rm) => acc + rm.area, 0).toFixed(1));
           return {
             ...alt,
-            rooms: updatedRooms,
-            grossArea: totalGross,
+            rooms: alt.rooms.map((r) => (r.id === roomId ? { ...r, ...updates } : r)),
           };
         }
         return alt;
@@ -433,47 +484,49 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       return {
         ...prev,
-        alternatives: updatedAlternatives,
+        alternatives: newAlternatives,
         dependentOutputsOutdated: true,
+        workflow: prev.workflow.map((w) =>
+          ['coordinated2d', 'coordinated3d', 'compliance', 'boq'].includes(w.screenId)
+            ? { ...w, status: 'outdated' }
+            : w
+        ),
       };
     });
-    addToast('Room Geometry Adjusted', 'Coordinated 2D/3D views marked as needing sync.', 'warning');
   };
 
   const selectAlternative = (altId: string) => {
-    setProject((prev) => {
-      const updated = prev.alternatives.map((a) => ({
-        ...a,
-        selected: a.id === altId,
-      }));
-      return {
-        ...prev,
-        alternatives: updated,
-        activeAlternativeId: altId,
-        dependentOutputsOutdated: true,
-      };
-    });
-    addToast('Alternative Selected', `Active scheme switched. Synchronize views to align.`, 'info');
+    setProject((prev) => ({
+      ...prev,
+      activeAlternativeId: altId,
+      dependentOutputsOutdated: true,
+    }));
+    addToast('Alternative Selected', `Active floor plan option changed.`, 'info');
   };
 
   const approveRevision = (type: 'plot' | 'brief' | 'plan' | 'compliance', summary: string) => {
-    setProject((prev) => {
-      const revNum = prev.revisions.length + 1;
-      const code = `REV-0${revNum}`;
-      const newRev = {
-        id: `rev-${Date.now()}`,
-        code,
-        timestamp: 'Just now',
-        author: 'Lead Architect',
-        summary,
-        type,
-      };
+    const revIndex = project.revisions.length + 1;
+    const code = `REV-0${revIndex}`;
+    const newRev = {
+      id: `rev-0${revIndex}`,
+      code,
+      timestamp: new Date().toISOString(),
+      author: 'Compose AI Studio Lead',
+      summary,
+      type,
+    };
 
-      const updatedWorkflow = prev.workflow.map((st) => {
-        if (st.screenId === currentScreen) {
-          return { ...st, status: 'approved' as const, revision: code };
+    setProject((prev) => {
+      const updatedWorkflow = prev.workflow.map((w) => {
+        if (
+          (type === 'plot' && w.screenId === 'plot') ||
+          (type === 'brief' && w.screenId === 'architect') ||
+          (type === 'plan' && w.screenId === 'floorplan') ||
+          (type === 'compliance' && w.screenId === 'compliance')
+        ) {
+          return { ...w, status: 'approved' as const };
         }
-        return st;
+        return w;
       });
 
       return {
@@ -489,7 +542,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         dependentOutputsOutdated: false,
       };
     });
-    addToast('Revision Approved', `Created & approved ${project.identity.currentRevision} successfully.`, 'success');
+    addToast('Revision Approved', `Created & approved ${code} successfully.`, 'success');
   };
 
   const restoreRevision = (revCode: string) => {
@@ -517,35 +570,27 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addToast('Views Synchronized', `2D, 3D, Compliance, and BOQ synchronized with ${project.activeRevision}.`, 'success');
   };
 
-  const resetDemo = () => {
-    localStorage.removeItem(LOCAL_STORAGE_KEY_DEMO);
-    setProject(JSON.parse(JSON.stringify(INITIAL_JAKARTA_PROJECT)));
-    setDemoMode(true);
-    setCurrentScreen('dashboard');
-    setPresentationMode(false);
-    setPresentationStep(1);
-    addToast('Demo Reset', 'Reset to initial pristine Austin Contemporary Residence demo state.', 'info');
-  };
-
   // File management
   const addUploads = (newFiles: UploadedFile[]) => {
     setProject((prev) => ({
       ...prev,
       uploads: [...prev.uploads, ...newFiles],
     }));
-    addToast('Files Uploaded', `Added ${newFiles.length} document(s) to project workspace.`, 'success');
+    addToast('Files Uploaded', `Added ${newFiles.length} file(s) to project workspace.`, 'success');
   };
 
-  const removeUpload = (fileId: string) => {
+  const removeUpload = async (fileId: string) => {
     const fileToRemove = project.uploads.find((f) => f.id === fileId);
     if (fileToRemove) {
       setDeletedUploads((prev) => [fileToRemove, ...prev]);
+      // Remove from Supabase project_files and storage bucket
+      await deleteFileFromSupabase(project.id, fileId, fileToRemove.storagePath);
     }
     setProject((prev) => ({
       ...prev,
       uploads: prev.uploads.filter((f) => f.id !== fileId),
     }));
-    addToast('File Removed', 'Moved to trash. You can restore it if needed.', 'info');
+    addToast('File Removed', 'File deleted from project workspace.', 'info');
   };
 
   const restoreUpload = (fileId: string) => {
@@ -626,9 +671,16 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         currentScreen,
         setScreen: setCurrentScreen,
         project,
-        availableProjects,
-        selectProject,
+        companyProjects,
+        isLoadingProjects,
+        loadAllProjects,
+        openProjectById,
         createNewProject,
+        renameProject,
+        archiveProject,
+        duplicateProject,
+        deleteProject,
+        selectProject,
         updatePlot,
         updateRequirements,
         updateBrief,
@@ -660,17 +712,11 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         nextPresentationStep,
         prevPresentationStep,
         goToPresentationStep,
-        demoMode,
-        setDemoMode,
-        switchToDemoMode,
-        switchToLiveMode,
-        resetDemo,
         isAutosaving,
         autosaveStatus,
         autosaveTime,
         retryAutosave,
-        openProjectById,
-        isLoadingProject,
+        saveCurrentProjectNow,
         settingsOpen,
         setSettingsOpen,
         onboardingOpen,
@@ -691,7 +737,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 };
 
-export const useProject = () => {
+export const useProject = (): ProjectContextType => {
   const context = useContext(ProjectContext);
   if (!context) {
     throw new Error('useProject must be used within a ProjectProvider');

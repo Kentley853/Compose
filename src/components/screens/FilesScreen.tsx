@@ -1,13 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { useProject } from '../../context/ProjectContext';
-import { useAuth } from '../../context/AuthContext';
 import {
   uploadProjectFileToStorage,
   getFileDownloadUrl,
-  deleteFileFromStorage,
+  deleteFileFromSupabase,
   isSupabaseConfigured,
 } from '../../services/supabase';
-import { UploadedFile, FileCategory, FileProcessingStatus } from '../../types/architecture';
+import { UploadedFile, FileCategory } from '../../types/architecture';
 import {
   FolderArchive,
   UploadCloud,
@@ -31,6 +30,8 @@ import {
   Sparkles,
   X,
   Package,
+  FileCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   generateAndDownloadProjectZip,
@@ -40,7 +41,6 @@ import {
   generatePlanSVG,
   downloadText,
 } from '../../services/exportPackage';
-import { HelpTooltip } from '../common/HelpTooltip';
 
 const FILE_CATEGORIES: FileCategory[] = [
   'Site Plan',
@@ -54,21 +54,24 @@ const FILE_CATEGORIES: FileCategory[] = [
   'Other',
 ];
 
-const ACCEPTED_EXTENSIONS = [
-  '.dwg',
-  '.dxf',
-  '.pdf',
+// Exact supported formats specified:
+// Documents: PDF, DOCX, XLSX and CSV
+// Drawings: DWG, DXF, IFC and RVT
+// 3D files: OBJ, FBX, GLB and GLTF
+// Images: PNG, JPG, JPEG and WEBP
+const SUPPORTED_FORMATS = {
+  documents: ['.pdf', '.docx', '.xlsx', '.csv'],
+  drawings: ['.dwg', '.dxf', '.ifc', '.rvt'],
+  threeD: ['.obj', '.fbx', '.glb', '.gltf'],
+  images: ['.png', '.jpg', '.jpeg', '.webp'],
+};
+
+const ALL_ACCEPTED_EXTENSIONS = [
+  ...SUPPORTED_FORMATS.documents,
+  ...SUPPORTED_FORMATS.drawings,
+  ...SUPPORTED_FORMATS.threeD,
+  ...SUPPORTED_FORMATS.images,
   '.svg',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.docx',
-  '.xlsx',
-  '.csv',
-  '.glb',
-  '.gltf',
-  '.obj',
-  '.ifc',
 ];
 
 export const FilesScreen: React.FC = () => {
@@ -83,7 +86,6 @@ export const FilesScreen: React.FC = () => {
     deletedUploads,
     addToast,
   } = useProject();
-  const { user } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -105,10 +107,12 @@ export const FilesScreen: React.FC = () => {
   const [showTrash, setShowTrash] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
 
-  // File Upload handler with Supabase Storage upload, validation & progress
+  // Delete Confirmation Modal state
+  const [fileToDelete, setFileToDelete] = useState<UploadedFile | null>(null);
+
+  // File Upload handler with Supabase Storage upload, validation & beginner-friendly feedback
   const handleFilesChosen = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
-    const targetUserId = user?.id || 'usr-architect-alpha-01';
 
     const newUploadedFiles: UploadedFile[] = [];
     const uploadTasks: Array<{ id: string; name: string; progress: number; size: string; error?: string }> = [];
@@ -118,61 +122,79 @@ export const FilesScreen: React.FC = () => {
     for (const file of filesArray) {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
 
-      // Validation 1: Empty file check
+      // Validation 1: Zero-byte empty check
       if (file.size === 0) {
-        addToast('Invalid File', `"${file.name}" is empty (0 bytes).`, 'error');
+        addToast(
+          'Empty File',
+          `The file "${file.name}" is empty (0 bytes). Please upload a valid document or drawing.`,
+          'error'
+        );
         continue;
       }
 
       // Validation 2: Max 25MB check
       if (file.size > 25 * 1024 * 1024) {
-        addToast('File Too Large', `"${file.name}" exceeds the 25MB limit.`, 'error');
+        addToast(
+          'File Too Large',
+          `"${file.name}" is ${(file.size / (1024 * 1024)).toFixed(1)}MB. The maximum allowed file size is 25MB.`,
+          'error'
+        );
         continue;
       }
 
       // Validation 3: Supported extension check
-      if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-        addToast('Unsupported Format', `Extension ${ext} is not supported.`, 'warning');
+      if (!ALL_ACCEPTED_EXTENSIONS.includes(ext)) {
+        addToast(
+          'Unsupported Format',
+          `Format "${ext}" is not supported. Please upload Documents (PDF, DOCX, XLSX, CSV), Drawings (DWG, DXF, IFC, RVT), 3D files (OBJ, FBX, GLB, GLTF), or Images (PNG, JPG, JPEG, WEBP).`,
+          'warning'
+        );
         continue;
       }
 
-      // Auto-determine category & experimental badge
+      // Categorize automatically
       let category: FileCategory = 'Other';
-      if (['.dwg', '.dxf', '.ifc'].includes(ext)) category = 'Site Plan';
-      else if (['.png', '.jpg', '.jpeg', '.svg'].includes(ext)) category = 'Reference Image';
+      if (SUPPORTED_FORMATS.drawings.includes(ext)) category = 'Site Plan';
+      else if (SUPPORTED_FORMATS.images.includes(ext) || ext === '.svg') category = 'Reference Image';
       else if (['.csv', '.xlsx'].includes(ext)) category = 'BOQ';
-      else if (['.glb', '.gltf', '.obj'].includes(ext)) category = '3D Reference';
+      else if (SUPPORTED_FORMATS.threeD.includes(ext)) category = '3D Reference';
       else if (['.pdf', '.docx'].includes(ext)) category = 'Project Brief';
 
-      const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-      const sizeStr = file.size > 1024 * 1024
-        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-        : `${Math.round(file.size / 1024)} KB`;
+      const fileId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const sizeStr =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.round(file.size / 1024)} KB`;
 
       uploadTasks.push({
         id: fileId,
         name: file.name,
-        progress: 40,
+        progress: 50,
         size: sizeStr,
       });
 
       try {
-        // Upload to private Supabase Storage: user_id/project_id/files/
-        const uploadResult = await uploadProjectFileToStorage(targetUserId, project.id, file);
+        // Upload to private Supabase Storage bucket 'project-files' and record metadata
+        const uploadResult = await uploadProjectFileToStorage(
+          project.id,
+          file,
+          category,
+          `Uploaded to ${project.identity.name}`
+        );
 
         newUploadedFiles.push({
-          id: fileId,
+          id: uploadResult.fileId || fileId,
           name: file.name,
           type: category,
           category,
           size: uploadResult.sizeFormatted,
           sizeBytes: uploadResult.sizeBytes,
-          uploadDate: 'Just now',
-          status: ['dwg', 'ifc', 'obj'].includes(ext.replace('.', '')) ? 'Needs review' : 'Ready',
+          uploadDate: new Date().toLocaleDateString(),
+          status: ['dwg', 'dxf', 'ifc', 'rvt', 'obj'].includes(ext.replace('.', '')) ? 'Ready' : 'Ready',
           extension: ext,
           usedByRevision: project.activeRevision,
-          isExperimental: ['.dwg', '.ifc', '.obj'].includes(ext),
-          notes: file.name.includes('survey') ? 'Site boundary coordinates extracted.' : 'Document stored securely in Supabase.',
+          isExperimental: ['.dwg', '.ifc', '.rvt', '.obj', '.fbx'].includes(ext),
+          notes: 'Stored permanently in private Supabase Storage bucket',
           storagePath: uploadResult.storagePath,
           fileUrl: uploadResult.signedUrl,
           previewUrl: uploadResult.signedUrl,
@@ -187,11 +209,12 @@ export const FilesScreen: React.FC = () => {
           category,
           size: sizeStr,
           sizeBytes: file.size,
-          uploadDate: 'Just now',
+          uploadDate: new Date().toLocaleDateString(),
           status: 'Ready',
           extension: ext,
           previewUrl: objUrl,
           fileUrl: objUrl,
+          notes: 'Stored in local workspace',
         });
       }
     }
@@ -224,21 +247,25 @@ export const FilesScreen: React.FC = () => {
   const handleReplaceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!replacingFileId || !e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
-    const targetUserId = user?.id || 'usr-architect-alpha-01';
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
     const old = project.uploads.find((f) => f.id === replacingFileId);
     if (!old) return;
 
     try {
-      const uploadResult = await uploadProjectFileToStorage(targetUserId, project.id, file);
+      const uploadResult = await uploadProjectFileToStorage(
+        project.id,
+        file,
+        old.category || 'Other',
+        'Replaced version'
+      );
       const replaced: UploadedFile = {
         ...old,
         name: file.name,
         size: uploadResult.sizeFormatted,
         sizeBytes: uploadResult.sizeBytes,
-        uploadDate: 'Just now',
+        uploadDate: new Date().toLocaleDateString(),
         extension: ext,
-        notes: `Replaced file on ${new Date().toLocaleDateString()}`,
+        notes: `Replaced on ${new Date().toLocaleDateString()}`,
         storagePath: uploadResult.storagePath,
         fileUrl: uploadResult.signedUrl,
         previewUrl: uploadResult.signedUrl,
@@ -246,16 +273,17 @@ export const FilesScreen: React.FC = () => {
 
       replaceUpload(replacingFileId, replaced);
     } catch {
-      const sizeStr = file.size > 1024 * 1024
-        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-        : `${Math.round(file.size / 1024)} KB`;
+      const sizeStr =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.round(file.size / 1024)} KB`;
       const replaced: UploadedFile = {
         ...old,
         name: file.name,
         size: sizeStr,
-        uploadDate: 'Just now',
+        uploadDate: new Date().toLocaleDateString(),
         extension: ext,
-        notes: `Replaced file on ${new Date().toLocaleDateString()}`,
+        notes: `Replaced on ${new Date().toLocaleDateString()}`,
       };
       replaceUpload(replacingFileId, replaced);
     } finally {
@@ -276,7 +304,7 @@ export const FilesScreen: React.FC = () => {
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
-          addToast('Signed Download', `Downloading "${file.name}" via secure signed URL.`, 'success');
+          addToast('Signed Download', `Downloading "${file.name}" from Supabase Storage.`, 'success');
           return;
         }
       } catch (err: any) {
@@ -284,7 +312,7 @@ export const FilesScreen: React.FC = () => {
       }
     }
 
-    // 2. If objectUrl or direct URL available
+    // 2. Direct object URL fallback
     if (file.fileUrl && !file.fileUrl.startsWith('#')) {
       const a = document.createElement('a');
       a.href = file.fileUrl;
@@ -297,63 +325,77 @@ export const FilesScreen: React.FC = () => {
       return;
     }
 
-    // 3. Fallback to format generator
+    // 3. Fallback to format generator for synthesized assets
     if (file.name.endsWith('.svg')) {
-      downloadText(generatePlanSVG(project), file.name, 'image/svg+xml');
+      const svg = generatePlanSVG(project, 1);
+      downloadText(svg, file.name, 'image/svg+xml');
     } else if (file.name.endsWith('.csv')) {
-      downloadText(generateBOQCSV(project), file.name, 'text/csv');
+      const csv = generateBOQCSV(project);
+      downloadText(csv, file.name, 'text/csv');
     } else {
-      const summaryText = `Compose AI Ingested Document: ${file.name}\nProject: ${project.identity.name}\nCategory: ${file.category || file.type}\nRevision: ${file.usedByRevision || project.activeRevision}\nTimestamp: ${new Date().toISOString()}\n`;
-      downloadText(summaryText, file.name);
+      addToast('Download Info', `File "${file.name}" is stored securely in project files.`, 'info');
     }
-    addToast('Download Started', `Saved "${file.name}" to disk.`, 'info');
+  };
+
+  const confirmDeleteFile = (file: UploadedFile) => {
+    setFileToDelete(file);
+  };
+
+  const executeDeleteFile = async () => {
+    if (!fileToDelete) return;
+    await removeUpload(fileToDelete.id);
+    setFileToDelete(null);
   };
 
   const handleDownloadAllZip = async () => {
     setIsZipping(true);
+    addToast('Generating Archive', 'Bundling all drawings, brief, BOQ, and assets into ZIP package...', 'info');
     try {
       await generateAndDownloadProjectZip(project);
-      addToast('Project Archive Downloaded', 'Complete ZIP package created successfully.', 'success');
-    } catch (err) {
-      console.error('ZIP packaging error:', err);
-      addToast('Export Error', 'Could not generate ZIP package.', 'error');
+      addToast('Archive Ready', 'Project ZIP package downloaded successfully.', 'success');
+    } catch (e: any) {
+      addToast('Archive Failed', e.message || 'Could not assemble ZIP.', 'error');
     } finally {
       setIsZipping(false);
     }
   };
 
-  // Filtered files
   const filteredFiles = project.uploads.filter((f) => {
     const matchesSearch =
       f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (f.category && f.category.toLowerCase().includes(searchQuery.toLowerCase()));
+      (f.notes && f.notes.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCat = selectedCategory === 'all' || f.category === selectedCategory || f.type === selectedCategory;
     return matchesSearch && matchesCat;
   });
 
   const getFileIcon = (ext?: string, category?: string) => {
-    if (ext === '.pdf') return <FileText className="w-5 h-5 text-[#F04438]" />;
-    if (['.png', '.jpg', '.jpeg', '.svg'].includes(ext || '')) return <Image className="w-5 h-5 text-[#2563EB]" />;
-    if (['.csv', '.xlsx'].includes(ext || '')) return <FileSpreadsheet className="w-5 h-5 text-[#12B76A]" />;
-    if (['.glb', '.gltf', '.obj'].includes(ext || '')) return <Box className="w-5 h-5 text-[#7A5AF8]" />;
-    if (['.dwg', '.dxf', '.ifc'].includes(ext || '')) return <FileCode2 className="w-5 h-5 text-[#F79009]" />;
+    if (ext === '.svg' || category === 'Site Plan') return <FileCode2 className="w-5 h-5 text-[#2563EB]" />;
+    if (['.png', '.jpg', '.jpeg', '.webp'].includes(ext || '') || category === 'Reference Image')
+      return <Image className="w-5 h-5 text-[#7A5AF8]" />;
+    if (ext === '.csv' || ext === '.xlsx' || category === 'BOQ')
+      return <FileSpreadsheet className="w-5 h-5 text-[#12B76A]" />;
+    if (['.glb', '.gltf', '.obj', '.fbx'].includes(ext || '') || category === '3D Reference')
+      return <Box className="w-5 h-5 text-[#F79009]" />;
+    if (ext === '.pdf') return <FileText className="w-5 h-5 text-[#D92D20]" />;
+    if (['.dwg', '.dxf', '.ifc', '.rvt'].includes(ext || ''))
+      return <Layers className="w-5 h-5 text-[#026AA2]" />;
     return <FileText className="w-5 h-5 text-[#667085]" />;
   };
 
   return (
     <div className="flex-1 bg-[#F7F8FA] overflow-y-auto min-h-screen flex flex-col">
       <div className="max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-6">
-        {/* Header with Title and Actions */}
+        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-              <h1 className="text-fluid-xl font-bold text-[#172033] tracking-tight">Files Workspace</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-[#172033] tracking-tight">Project Files & Cloud Storage</h1>
               <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#2563EB]">
                 {project.uploads.length} files
               </span>
             </div>
-            <p className="text-sm text-[#667085] mt-1">
-              Manage site plans, surveys, reference models, and download generated Compose AI packages.
+            <p className="text-xs sm:text-sm text-[#667085] mt-1">
+              Private company storage connected to Supabase bucket <code className="px-1 py-0.5 rounded bg-white border border-[#E4E7EC] font-mono text-[11px] text-[#2563EB]">project-files</code>.
             </p>
           </div>
 
@@ -398,7 +440,7 @@ export const FilesScreen: React.FC = () => {
             ref={fileInputRef}
             onChange={(e) => handleFilesChosen(e.target.files)}
             multiple
-            accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg,.docx,.xlsx,.csv,.glb,.gltf,.obj,.ifc"
+            accept=".dwg,.dxf,.ifc,.rvt,.obj,.fbx,.glb,.gltf,.pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.svg"
             className="hidden"
           />
 
@@ -410,32 +452,61 @@ export const FilesScreen: React.FC = () => {
             Click to upload or drag and drop files here
           </div>
           <p className="text-xs text-[#667085] mt-1 max-w-lg mx-auto">
-            Upload site surveys, CAD plot drawings, client briefs, or reference images for AI reasoning.
+            Uploaded files are stored securely in Supabase Storage with metadata recorded in the company database.
           </p>
 
-          {/* Accepted formats chip bar */}
-          <div className="mt-4 pt-3 border-t border-[#E4E7EC]/60 flex flex-wrap items-center justify-center gap-1.5 text-[11px] text-[#667085]">
-            <span className="font-semibold text-[#172033]">Accepted:</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#F2F4F7] border border-[#E4E7EC]">PDF</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#F2F4F7] border border-[#E4E7EC]">SVG</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#F2F4F7] border border-[#E4E7EC]">PNG / JPG</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#F2F4F7] border border-[#E4E7EC]">CSV / XLSX</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#F2F4F7] border border-[#E4E7EC]">GLB / GLTF</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#FFF4ED] text-[#B54708] border border-[#FECDCA]">
-              DWG / DXF (CAD)*
-            </span>
-            <span className="px-1.5 py-0.5 rounded bg-[#FFF4ED] text-[#B54708] border border-[#FECDCA]">
-              IFC (BIM)*
-            </span>
-            <span className="text-[#667085]/80 text-[10px] ml-1">Max 25MB (*CAD/BIM experimental preview)</span>
+          {/* Formats Grid Display */}
+          <div className="mt-5 pt-4 border-t border-[#E4E7EC] grid grid-cols-2 sm:grid-cols-4 gap-2 text-left">
+            <div className="p-2 rounded-lg bg-[#F9FAFB] border border-[#E4E7EC]">
+              <div className="text-[11px] font-bold text-[#172033] flex items-center gap-1 mb-1">
+                <FileText className="w-3.5 h-3.5 text-red-500" />
+                <span>Documents</span>
+              </div>
+              <div className="text-[10px] text-[#667085] font-mono">
+                PDF, DOCX, XLSX, CSV
+              </div>
+            </div>
+
+            <div className="p-2 rounded-lg bg-[#F9FAFB] border border-[#E4E7EC]">
+              <div className="text-[11px] font-bold text-[#172033] flex items-center gap-1 mb-1">
+                <Layers className="w-3.5 h-3.5 text-blue-600" />
+                <span>Drawings</span>
+              </div>
+              <div className="text-[10px] text-[#667085] font-mono">
+                DWG, DXF, IFC, RVT
+              </div>
+            </div>
+
+            <div className="p-2 rounded-lg bg-[#F9FAFB] border border-[#E4E7EC]">
+              <div className="text-[11px] font-bold text-[#172033] flex items-center gap-1 mb-1">
+                <Box className="w-3.5 h-3.5 text-amber-600" />
+                <span>3D Files</span>
+              </div>
+              <div className="text-[10px] text-[#667085] font-mono">
+                OBJ, FBX, GLB, GLTF
+              </div>
+            </div>
+
+            <div className="p-2 rounded-lg bg-[#F9FAFB] border border-[#E4E7EC]">
+              <div className="text-[11px] font-bold text-[#172033] flex items-center gap-1 mb-1">
+                <Image className="w-3.5 h-3.5 text-purple-600" />
+                <span>Images</span>
+              </div>
+              <div className="text-[10px] text-[#667085] font-mono">
+                PNG, JPG, JPEG, WEBP
+              </div>
+            </div>
+          </div>
+          <div className="text-[11px] text-[#667085] mt-2">
+            Maximum file size: <strong>25MB per file</strong>
           </div>
         </div>
 
-        {/* Active Uploads Progress Bar */}
+        {/* Active Uploads Progress */}
         {activeUploads.length > 0 && (
           <div className="bg-white border border-[#E4E7EC] rounded-xl p-4 shadow-xs space-y-3">
             <div className="text-xs font-semibold text-[#172033] flex items-center justify-between">
-              <span>Uploading {activeUploads.length} file(s)...</span>
+              <span>Uploading {activeUploads.length} file(s) to Supabase Storage...</span>
               <span className="text-[#2563EB] font-mono text-[11px]">In progress</span>
             </div>
             {activeUploads.map((t) => (
@@ -455,110 +526,71 @@ export const FilesScreen: React.FC = () => {
           </div>
         )}
 
-        {/* Trash / Recently Deleted Accordion (if open) */}
-        {showTrash && (
-          <div className="bg-[#FFF4ED]/40 border border-[#FECDCA] rounded-xl p-4 space-y-3 animate-in fade-in">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[#B42318] flex items-center gap-1.5">
-                <Trash2 className="w-4 h-4" /> Trash ({deletedUploads.length} items)
-              </span>
-              <span className="text-[11px] text-[#667085]">Files can be restored at any time</span>
-            </div>
-            {deletedUploads.length === 0 ? (
-              <div className="text-xs text-[#667085] py-2 text-center">Trash is empty.</div>
-            ) : (
-              <div className="divide-y divide-[#FECDCA]/60">
-                {deletedUploads.map((f) => (
-                  <div key={f.id} className="py-2 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[#172033] font-medium">{f.name}</span>
-                      <span className="text-[10px] text-[#667085]">({f.size})</span>
-                    </div>
-                    <button
-                      onClick={() => restoreUpload(f.id)}
-                      className="px-2.5 py-1 rounded bg-white border border-[#E4E7EC] text-xs font-semibold text-[#2563EB] hover:bg-[#EEF4FF] flex items-center gap-1"
-                    >
-                      <RotateCcw className="w-3 h-3" /> Restore
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Filters and Search Bar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-[#E4E7EC] shadow-xs">
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 text-[#667085] absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="Search project files..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-[#E4E7EC] focus:outline-hidden focus:border-[#2563EB]"
+            />
           </div>
-        )}
 
-        {/* Search, Category Filters & File Table */}
-        <div className="bg-white border border-[#E4E7EC] rounded-xl shadow-xs overflow-hidden">
-          {/* Controls Bar */}
-          <div className="p-4 border-b border-[#E4E7EC] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            {/* Search */}
-            <div className="relative flex-1 max-w-sm">
-              <Search className="w-4 h-4 text-[#667085] absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search files by name or tag..."
-                className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-[#E4E7EC] text-xs text-[#172033] placeholder-[#667085] focus:outline-none focus:border-[#2563EB]"
-              />
-            </div>
-
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-              <button
-                onClick={() => setSelectedCategory('all')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  selectedCategory === 'all'
-                    ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                    : 'text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB]'
-                }`}
-              >
-                All ({project.uploads.length})
-              </button>
-              {FILE_CATEGORIES.map((cat) => (
+          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            <Filter className="w-3.5 h-3.5 text-[#667085] shrink-0" />
+            <span className="text-xs text-[#667085] shrink-0">Filter:</span>
+            <div className="flex items-center gap-1">
+              {['all', 'Site Plan', 'Project Brief', 'BOQ', '3D Reference', 'Reference Image'].map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
                     selectedCategory === cat
                       ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                      : 'text-[#667085] hover:text-[#172033] hover:bg-[#F9FAFB]'
+                      : 'text-[#667085] hover:bg-[#F2F4F7]'
                   }`}
                 >
-                  {cat}
+                  {cat === 'all' ? 'All Files' : cat}
                 </button>
               ))}
             </div>
           </div>
+        </div>
 
-          {/* Table */}
-          {filteredFiles.length === 0 ? (
-            <div className="p-8 text-center">
-              <FolderArchive className="w-10 h-10 text-[#667085]/40 mx-auto mb-2" />
-              <div className="text-sm font-semibold text-[#172033]">No documents found</div>
-              <p className="text-xs text-[#667085] mt-1">
-                Upload your first site drawing or clear active filters.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto overscroll-x-contain">
-              <table className="w-full min-w-[46rem] text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-[#E4E7EC] bg-[#F9FAFB] text-[11px] font-semibold text-[#667085] uppercase tracking-wider">
-                    <th className="py-2.5 px-4">File Name</th>
-                    <th className="py-2.5 px-4">Category</th>
-                    <th className="py-2.5 px-4">Size</th>
-                    <th className="py-2.5 px-4">Status</th>
-                    <th className="py-2.5 px-4">Used In</th>
-                    <th className="py-2.5 px-4 text-right">Actions</th>
+        {/* Files Table List */}
+        <div className="bg-white border border-[#E4E7EC] rounded-xl overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-[#F9FAFB] border-b border-[#E4E7EC] text-[#667085] font-semibold text-[11px] uppercase tracking-wider">
+                  <th className="py-3 px-4">File Name</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Size</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Revision</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E4E7EC]">
+                {filteredFiles.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-[#667085]">
+                      <FolderArchive className="w-8 h-8 text-[#98A2B3] mx-auto mb-2 opacity-50" />
+                      <p className="font-semibold text-[#172033]">No files found</p>
+                      <p className="text-xs mt-1">Upload CAD drawings, site surveys, or design briefs above.</p>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E4E7EC] text-xs">
-                  {filteredFiles.map((file) => (
-                    <tr key={file.id} className="hover:bg-[#F9FAFB] transition-colors group">
+                ) : (
+                  filteredFiles.map((file) => (
+                    <tr key={file.id} className="hover:bg-[#F9FAFB]/80 transition-colors">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          {getFileIcon(file.extension, file.category)}
+                          <div className="w-8 h-8 rounded-lg bg-[#F2F4F7] flex items-center justify-center shrink-0">
+                            {getFileIcon(file.extension, file.category)}
+                          </div>
                           <div className="min-w-0">
                             {editingFileId === file.id ? (
                               <div className="flex items-center gap-1.5">
@@ -566,21 +598,21 @@ export const FilesScreen: React.FC = () => {
                                   type="text"
                                   value={editName}
                                   onChange={(e) => setEditName(e.target.value)}
-                                  className="px-2 py-0.5 rounded border border-[#2563EB] text-xs"
+                                  className="px-2 py-0.5 rounded border border-[#2563EB] text-xs font-semibold"
                                   autoFocus
                                 />
                                 <button
                                   onClick={() => {
-                                    if (editName.trim()) renameUpload(file.id, editName.trim());
+                                    renameUpload(file.id, editName);
                                     setEditingFileId(null);
                                   }}
-                                  className="text-[#12B76A] hover:underline font-semibold text-[11px]"
+                                  className="text-xs text-blue-600 font-semibold"
                                 >
                                   Save
                                 </button>
                                 <button
                                   onClick={() => setEditingFileId(null)}
-                                  className="text-[#667085] hover:underline text-[11px]"
+                                  className="text-xs text-[#667085]"
                                 >
                                   Cancel
                                 </button>
@@ -590,7 +622,7 @@ export const FilesScreen: React.FC = () => {
                                 <span className="font-semibold text-[#172033]">{file.name}</span>
                                 {file.isExperimental && (
                                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#FFF4ED] text-[#B54708] border border-[#FECDCA]">
-                                    Experimental
+                                    CAD / BIM
                                   </span>
                                 )}
                               </div>
@@ -635,17 +667,10 @@ export const FilesScreen: React.FC = () => {
                       <td className="py-3 px-4 font-mono text-[#667085]">{file.size}</td>
 
                       <td className="py-3 px-4">
-                        {file.status === 'Ready' || file.status === 'Processed' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#ECFDF3] text-[#027A48] font-medium text-[11px]">
-                            <CheckCircle2 className="w-3 h-3 text-[#12B76A]" />
-                            Ready
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#FFF4ED] text-[#B54708] font-medium text-[11px]">
-                            <AlertCircle className="w-3 h-3 text-[#F79009]" />
-                            {file.status}
-                          </span>
-                        )}
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#ECFDF3] text-[#027A48] font-medium text-[11px]">
+                          <CheckCircle2 className="w-3 h-3 text-[#12B76A]" />
+                          Ready
+                        </span>
                       </td>
 
                       <td className="py-3 px-4 font-mono text-[11px] text-[#667085]">
@@ -657,7 +682,7 @@ export const FilesScreen: React.FC = () => {
                           <button
                             onClick={() => setPreviewFile(file)}
                             className="p-1 rounded-md text-[#667085] hover:text-[#2563EB] hover:bg-[#EEF4FF] transition-colors"
-                            title="Preview file"
+                            title="Preview / Open file"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -687,65 +712,57 @@ export const FilesScreen: React.FC = () => {
                               replaceInputRef.current?.click();
                             }}
                             className="p-1 rounded-md text-[#667085] hover:text-[#2563EB] hover:bg-[#EEF4FF] transition-colors"
-                            title="Replace file version"
+                            title="Replace version"
                           >
                             <RotateCcw className="w-4 h-4" />
                           </button>
 
                           <button
-                            onClick={() => removeUpload(file.id)}
+                            onClick={() => confirmDeleteFile(file)}
                             className="p-1 rounded-md text-[#667085] hover:text-[#F04438] hover:bg-[#FEE4E2] transition-colors"
-                            title="Delete"
+                            title="Delete file"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Hidden File Input for Replace Action */}
-        <input
-          type="file"
-          ref={replaceInputRef}
-          onChange={handleReplaceFile}
-          className="hidden"
-        />
-
-        {/* Compose AI Generated Outputs Download Hub */}
-        <div className="bg-white border border-[#E4E7EC] rounded-xl p-6 shadow-xs space-y-4">
+        {/* Generated Exports Card Section */}
+        <div className="bg-white border border-[#E4E7EC] rounded-xl p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-base font-bold text-[#172033]">Export Compose AI Project Artifacts</h2>
+              <h2 className="text-sm font-bold text-[#172033] flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#2563EB]" />
+                Generated Architectural Deliverables
+              </h2>
               <p className="text-xs text-[#667085] mt-0.5">
-                Download generated design models, vector CAD sheets, and scheduled quantities.
+                Computed exports generated from the active layout alternative and regional pricing.
               </p>
             </div>
-            <span className="text-xs font-mono text-[#2563EB] bg-[#EEF4FF] px-2.5 py-1 rounded-md">
-              {project.activeRevision}
-            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Card 1: 2D CAD SVG */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            {/* Card 1: 2D Plan SVG */}
             <div className="p-3.5 rounded-xl border border-[#E4E7EC] bg-[#F9FAFB] hover:border-[#2563EB]/40 transition-colors flex flex-col justify-between">
               <div>
                 <FileCode2 className="w-5 h-5 text-[#2563EB] mb-2" />
-                <div className="text-xs font-bold text-[#172033]">2D Coordinated Plan (SVG)</div>
+                <div className="text-xs font-bold text-[#172033]">Floor Plan Drawing (SVG)</div>
                 <p className="text-[11px] text-[#667085] mt-1">
-                  Vector floor plan with structural grids and dimensions.
+                  Vector floor plan with dimensions and wall thickness.
                 </p>
               </div>
               <button
                 onClick={() =>
                   downloadText(
                     generatePlanSVG(project, 1),
-                    `${project.identity.name}_L1_Plan.svg`,
+                    `${project.identity.name}_Plan_L1.svg`,
                     'image/svg+xml'
                   )
                 }
@@ -755,13 +772,13 @@ export const FilesScreen: React.FC = () => {
               </button>
             </div>
 
-            {/* Card 2: BOQ Spreadsheet */}
+            {/* Card 2: BOQ Schedule */}
             <div className="p-3.5 rounded-xl border border-[#E4E7EC] bg-[#F9FAFB] hover:border-[#12B76A]/40 transition-colors flex flex-col justify-between">
               <div>
                 <FileSpreadsheet className="w-5 h-5 text-[#12B76A] mb-2" />
                 <div className="text-xs font-bold text-[#172033]">BOQ Schedule (CSV)</div>
                 <p className="text-[11px] text-[#667085] mt-1">
-                  Scheduled quantities, labor rates, and total cost estimates.
+                  Scheduled quantities, labor rates, and cost estimates.
                 </p>
               </div>
               <button
@@ -778,13 +795,13 @@ export const FilesScreen: React.FC = () => {
               </button>
             </div>
 
-            {/* Card 3: Brief & Compliance */}
+            {/* Card 3: Brief Markdown */}
             <div className="p-3.5 rounded-xl border border-[#E4E7EC] bg-[#F9FAFB] hover:border-[#F79009]/40 transition-colors flex flex-col justify-between">
               <div>
                 <FileText className="w-5 h-5 text-[#F79009] mb-2" />
                 <div className="text-xs font-bold text-[#172033]">Architectural Brief (MD)</div>
                 <p className="text-[11px] text-[#667085] mt-1">
-                  Design rationale, spatial program, and statutory screening.
+                  Design rationale, spatial program, and code notes.
                 </p>
               </div>
               <button
@@ -796,17 +813,17 @@ export const FilesScreen: React.FC = () => {
                 }
                 className="mt-3 w-full py-1.5 rounded-lg bg-white border border-[#E4E7EC] hover:bg-[#FFF4ED] text-xs font-semibold text-[#B54708] transition-colors flex items-center justify-center gap-1"
               >
-                <Download className="w-3.5 h-3.5" /> Download Markdown
+                <Download className="w-3.5 h-3.5" /> Download MD
               </button>
             </div>
 
-            {/* Card 4: Full ZIP Package */}
+            {/* Card 4: Full ZIP */}
             <div className="p-3.5 rounded-xl border border-[#2563EB]/30 bg-[#EEF4FF]/50 flex flex-col justify-between">
               <div>
                 <Package className="w-5 h-5 text-[#2563EB] mb-2" />
                 <div className="text-xs font-bold text-[#172033]">Complete Project Archive</div>
                 <p className="text-[11px] text-[#667085] mt-1">
-                  Full ZIP with drawings, brief, BOQ, manifest, and source files.
+                  Full ZIP package with drawings, brief, and BOQ.
                 </p>
               </div>
               <button
@@ -819,6 +836,52 @@ export const FilesScreen: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Hidden input for version replacement */}
+        <input
+          type="file"
+          ref={replaceInputRef}
+          onChange={handleReplaceFile}
+          className="hidden"
+          accept=".dwg,.dxf,.ifc,.rvt,.obj,.fbx,.glb,.gltf,.pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.svg"
+        />
+
+        {/* Delete Confirmation Modal */}
+        {fileToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in">
+            <div className="bg-white border border-[#E4E7EC] rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#172033]">Confirm File Deletion</h3>
+                  <p className="text-xs text-[#667085]">This action will delete the file from the project and Supabase Storage.</p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-[#F9FAFB] border border-[#E4E7EC] text-xs text-[#172033]">
+                <div className="font-semibold truncate">{fileToDelete.name}</div>
+                <div className="text-[11px] text-[#667085] mt-0.5">{fileToDelete.size} • {fileToDelete.category || fileToDelete.type}</div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  onClick={() => setFileToDelete(null)}
+                  className="px-4 py-2 rounded-lg border border-[#E4E7EC] text-xs font-semibold text-[#344054] hover:bg-[#F9FAFB] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeDeleteFile}
+                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-semibold text-white shadow-xs transition-colors"
+                >
+                  Delete File
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* File Preview Modal */}
         {previewFile && (
@@ -848,52 +911,57 @@ export const FilesScreen: React.FC = () => {
                     className="p-4 bg-white rounded-lg border border-[#E4E7EC] flex items-center justify-center overflow-auto"
                     dangerouslySetInnerHTML={{ __html: generatePlanSVG(project, 1) }}
                   />
-                ) : ['.png', '.jpg', '.jpeg'].includes(previewFile.extension || '') ? (
+                ) : ['.png', '.jpg', '.jpeg', '.webp'].includes(previewFile.extension || '') ? (
                   <div className="p-4 bg-white rounded-lg border border-[#E4E7EC] text-center">
-                    <div className="w-32 h-32 rounded-lg bg-[#EEF4FF] border border-[#2563EB]/20 text-[#2563EB] flex items-center justify-center mx-auto mb-2">
-                      <Image className="w-12 h-12" />
-                    </div>
-                    <p className="text-xs text-[#667085]">
-                      High-resolution site photograph referenced during AI massing orientation.
+                    {previewFile.fileUrl ? (
+                      <img
+                        src={previewFile.fileUrl}
+                        alt={previewFile.name}
+                        className="max-h-80 mx-auto rounded-lg object-contain shadow-xs"
+                      />
+                    ) : (
+                      <div className="w-32 h-32 rounded-lg bg-[#EEF4FF] border border-[#2563EB]/20 text-[#2563EB] flex items-center justify-center mx-auto mb-2">
+                        <Image className="w-12 h-12" />
+                      </div>
+                    )}
+                    <p className="text-xs text-[#667085] mt-2">
+                      High-resolution visual asset saved in Supabase Storage.
                     </p>
                   </div>
+                ) : previewFile.extension === '.csv' ? (
+                  <div className="p-4 bg-white rounded-lg border border-[#E4E7EC] font-mono text-xs overflow-x-auto">
+                    <pre className="text-[#344054]">{generateBOQCSV(project).slice(0, 800)}...</pre>
+                  </div>
                 ) : (
-                  <div className="p-4 bg-white rounded-lg border border-[#E4E7EC] font-mono text-xs text-[#172033] whitespace-pre-wrap leading-relaxed">
-                    {`[FILE METADATA & PARSED SCHEMATIC]
-File Name: ${previewFile.name}
-Category: ${previewFile.category || previewFile.type}
-Size: ${previewFile.size}
-Status: ${previewFile.status}
-Referenced Revision: ${previewFile.usedByRevision || project.activeRevision}
-Parsing Engine: Compose AI Ingestion Worker v2.4
-
---- EXTRACTED ATTRIBUTES ---
-- Coordinate Reference: UTM Zone 48S (Jakarta WGS84)
-- North Vector: 0° True North aligned
-- Setbacks Extracted: Front 5.0m, Rear 3.0m, Lateral 2.0m
-- Ingestion Notes: ${previewFile.notes || 'Successfully parsed and linked to spatial graph.'}`}
+                  <div className="p-8 bg-white rounded-lg border border-[#E4E7EC] text-center">
+                    <div className="w-12 h-12 rounded-xl bg-[#F2F4F7] text-[#667085] flex items-center justify-center mx-auto mb-3">
+                      {getFileIcon(previewFile.extension, previewFile.category)}
+                    </div>
+                    <h4 className="text-sm font-bold text-[#172033]">{previewFile.name}</h4>
+                    <p className="text-xs text-[#667085] mt-1 max-w-sm mx-auto">
+                      Binary asset ({previewFile.extension?.toUpperCase()}) stored securely in private Supabase Storage. Use Download to inspect in your CAD or BIM workstation.
+                    </p>
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => handleDownloadFile(previewFile)}
+                        className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Asset</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="px-6 py-3.5 bg-white border-t border-[#E4E7EC] flex items-center justify-between">
-                <span className="text-xs text-[#667085]">
-                  Conceptual file preview • Qualified review required
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleDownloadFile(previewFile)}
-                    className="px-3 py-1.5 rounded-lg bg-[#2563EB] text-white text-xs font-semibold hover:bg-[#1D4ED8] flex items-center gap-1"
-                  >
-                    <Download className="w-3.5 h-3.5" /> Download
-                  </button>
-                  <button
-                    onClick={() => setPreviewFile(null)}
-                    className="px-3 py-1.5 rounded-lg border border-[#E4E7EC] text-xs font-medium text-[#172033] hover:bg-[#F9FAFB]"
-                  >
-                    Close
-                  </button>
-                </div>
+              <div className="px-6 py-3 border-t border-[#E4E7EC] bg-white flex items-center justify-between text-xs text-[#667085]">
+                <span>Storage path: <code className="font-mono text-[10px] text-[#172033]">{previewFile.storagePath || 'project-files/' + previewFile.name}</code></span>
+                <button
+                  onClick={() => handleDownloadFile(previewFile)}
+                  className="font-semibold text-[#2563EB] hover:underline flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
               </div>
             </div>
           </div>

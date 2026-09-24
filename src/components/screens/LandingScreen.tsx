@@ -4,21 +4,23 @@ import { DisclaimerBanner } from '../common/DisclaimerBanner';
 import {
   ArrowRight,
   Compass,
-  Bot,
-  Grid3X3,
+  FileCode2,
   Box,
+  Layers,
+  ChevronRight,
+  Cpu,
   ShieldCheck,
   Calculator,
-  ChevronRight,
-  CheckCircle2,
-  FileText,
+  FolderKanban,
 } from 'lucide-react';
 
 export const LandingScreen: React.FC = () => {
-  const { setScreen, selectProject, availableProjects } = useProject();
+  const { setScreen, selectProject, companyProjects } = useProject();
 
   const handleLaunchDemo = () => {
-    selectProject('proj-jakarta-01');
+    if (companyProjects.length > 0) {
+      selectProject(companyProjects[0].id);
+    }
     setScreen('dashboard');
   };
 
@@ -43,13 +45,13 @@ export const LandingScreen: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 sm:gap-4 text-xs shrink-0">
-          <span className="text-slate-400 hidden sm:inline">Investor Concept Demo v1.4</span>
+          <span className="text-slate-400 hidden sm:inline">Architectural Concept Studio</span>
           <button
             id="btn-landing-top-enter"
             onClick={handleLaunchDemo}
             className="tap px-3.5 py-2 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 transition-colors font-medium whitespace-nowrap"
           >
-            Launch Demo
+            Open Studio
           </button>
         </div>
       </header>
@@ -64,14 +66,14 @@ export const LandingScreen: React.FC = () => {
               <span>Architectural Concept Platform</span>
             </div>
 
-            <h1 className="text-fluid-3xl font-semibold tracking-tight text-white leading-tight">
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight text-white leading-tight">
               From Plot to <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-slate-200">
                 Architectural Concept
               </span>
             </h1>
 
-            <p className="text-fluid-base text-slate-400 leading-relaxed max-w-xl font-normal">
+            <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-xl font-normal">
               Compose AI connects site intelligence, architectural reasoning, conceptual planning and coordinated 2D and 3D visualization in one continuous workflow.
             </p>
 
@@ -81,16 +83,17 @@ export const LandingScreen: React.FC = () => {
                 onClick={handleLaunchDemo}
                 className="w-full xs:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all shadow-lg shadow-blue-600/20"
               >
-                <span>Launch Demo Project</span>
+                <span>Open Project Workspace</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
 
               <button
                 id="btn-view-sample-project"
-                onClick={() => handleViewSample('proj-jakarta-01')}
+                onClick={() => setScreen('projects')}
                 className="w-full xs:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-sm font-medium transition-colors"
               >
-                <span>View Sample Project</span>
+                <FolderKanban className="w-4 h-4 text-blue-400" />
+                <span>All Company Projects</span>
               </button>
             </div>
 
@@ -101,21 +104,21 @@ export const LandingScreen: React.FC = () => {
 
           {/* Right Column: Architectural Pipeline Preview Card */}
           <div className="lg:col-span-5">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 sm:p-6 shadow-2xl backdrop-blur-sm space-y-4">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 sm:p-6 shadow-2xl backdrop-blur-xs space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
                 <div className="text-xs font-semibold text-slate-200">Continuous 10-Step Workflow</div>
                 <span className="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                  Investor Pitch Ready
+                  Supabase Powered
                 </span>
               </div>
 
               <div className="space-y-2 text-xs">
                 {[
-                  { step: '01', title: 'Plot Intelligence', desc: '15m × 24m parcel solar, setback & orientation calculations' },
-                  { step: '02', title: 'AI Architect Dialogue', desc: 'Structured brief generation & room zoning strategy' },
-                  { step: '03', title: 'Conceptual Floor Plan', desc: '3 architectural alternatives with interactive room schedule' },
-                  { step: '04', title: 'Coordinated 2D & 3D', desc: 'CAD layers and WebGL volumetric massing synchronized' },
-                  { step: '05', title: 'Compliance & BOQ', desc: 'Preliminary checks matrix and deterministic cost estimation' },
+                  { step: '01', title: 'Plot Intelligence', desc: 'Solar, setback & orientation calculations' },
+                  { step: '02', title: 'AI Architect Dialogue', desc: 'Structured brief generation & room zoning' },
+                  { step: '03', title: 'Conceptual Floor Plan', desc: 'Architectural alternatives with interactive schedule' },
+                  { step: '04', title: 'Coordinated 2D & 3D', desc: 'CAD layers and WebGL volumetric massing' },
+                  { step: '05', title: 'Compliance & BOQ', desc: 'Preliminary checks and deterministic cost takeoff' },
                 ].map((item) => (
                   <div
                     key={item.step}
@@ -130,22 +133,24 @@ export const LandingScreen: React.FC = () => {
                 ))}
               </div>
 
-              {/* Sample Projects Selector */}
-              <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                <div className="text-[11px] uppercase tracking-wider text-slate-400 font-mono">Sample Projects Included:</div>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {availableProjects.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => handleViewSample(p.id)}
-                      className="text-left px-2.5 py-1.5 rounded bg-slate-900/60 hover:bg-slate-800 text-[11px] text-slate-300 flex items-center justify-between group border border-slate-800/60 transition-colors"
-                    >
-                      <span className="truncate group-hover:text-blue-300 transition-colors">{p.identity.name}</span>
-                      <ChevronRight className="w-3 h-3 shrink-0 text-slate-500 group-hover:text-blue-400" />
-                    </button>
-                  ))}
+              {/* Company Projects List */}
+              {companyProjects.length > 0 && (
+                <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400 font-mono">Company Projects:</div>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {companyProjects.slice(0, 3).map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleViewSample(p.id)}
+                        className="text-left px-2.5 py-1.5 rounded bg-slate-900/60 hover:bg-slate-800 text-[11px] text-slate-300 flex items-center justify-between group border border-slate-800/60 transition-colors"
+                      >
+                        <span className="truncate group-hover:text-blue-300 transition-colors">{p.project_name}</span>
+                        <ChevronRight className="w-3 h-3 shrink-0 text-slate-500 group-hover:text-blue-400" />
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -157,9 +162,6 @@ export const LandingScreen: React.FC = () => {
           <span>Compose AI © 2026</span>
           <span>•</span>
           <span>Atelier Architecture Concept System</span>
-        </div>
-        <div className="text-slate-400 text-[11px]">
-          Demo environment active. Deterministic geometry & local AI fallback enabled.
         </div>
       </footer>
     </div>

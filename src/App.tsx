@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { ProjectProvider, useProject } from './context/ProjectContext';
-import { AuthProvider } from './context/AuthContext';
-import { AuthModal } from './components/auth/AuthModal';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { GuidedWorkflowBar } from './components/layout/GuidedWorkflowBar';
@@ -105,9 +103,6 @@ const MainAppContent: React.FC = () => {
       {/* Settings Modal */}
       <SettingsModal />
 
-      {/* Auth Modal (Sign In, Sign Up, Forgot Password) */}
-      <AuthModal />
-
       {/* Onboarding / Quick Guide Modal */}
       <OnboardingModal
         isOpen={guideOpen || onboardingOpen}
@@ -123,11 +118,9 @@ const MainAppContent: React.FC = () => {
 export default function App() {
   return (
     <ErrorBoundary fallbackTitle="Compose AI Application Error">
-      <AuthProvider>
-        <ProjectProvider>
-          <MainAppContent />
-        </ProjectProvider>
-      </AuthProvider>
+      <ProjectProvider>
+        <MainAppContent />
+      </ProjectProvider>
     </ErrorBoundary>
   );
 }
