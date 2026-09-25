@@ -80,6 +80,7 @@ export interface ProjectIdentity {
   codeEdition?: string;
   buildingType: string;
   description: string;
+  sourcePrompt?: string;
   createdDate: string;
   lastModified: string;
   currentRevision: string;

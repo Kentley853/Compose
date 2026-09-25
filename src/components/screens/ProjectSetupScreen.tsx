@@ -59,108 +59,65 @@ export const ProjectSetupScreen: React.FC = () => {
   const [formData, setFormData] = useState<ProjectWizardData>(() => {
     const draft = loadProjectDraft(project.id);
     return {
-      projectName: draft?.projectName || project.identity.name || 'Austin Modern Residence',
-      projectDescription:
-        draft?.projectDescription ||
-        project.identity.description ||
-        'Custom single-family residence optimizing passive solar exposure and indoor-outdoor entertainment.',
-      projectType: draft?.projectType || 'Single-family residential',
+      projectName: draft?.projectName || project.identity.name || '',
+      projectDescription: draft?.projectDescription || project.identity.description || project.identity.sourcePrompt || '',
+      projectType: draft?.projectType || project.identity.projectType || 'Single-family residential',
       projectStage: draft?.projectStage || 'Schematic design',
-      clientName: draft?.clientName || project.identity.clientName || 'Private Client Group',
-      clientEmail: draft?.clientEmail || 'client@austinhomes.example.com',
-      clientPhone: draft?.clientPhone || '(512) 555-0198',
-      architectName: draft?.architectName || 'Lead Design Director, Compose AI',
+      clientName: draft?.clientName || project.identity.clientName || '',
+      clientEmail: draft?.clientEmail || '',
+      clientPhone: draft?.clientPhone || '',
+      architectName: draft?.architectName || project.identity.leadArchitect || '',
       createdAt: draft?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
 
-      streetAddress: draft?.streetAddress || '2408 South Congress Ave',
-      city: draft?.city || 'Austin',
-      state: draft?.state || 'TX',
-      zipCode: draft?.zipCode || '78704',
+      streetAddress: draft?.streetAddress || project.identity.streetAddress || '',
+      city: draft?.city || project.identity.city || '',
+      state: draft?.state || project.identity.state || '',
+      zipCode: draft?.zipCode || project.identity.zipCode || '',
       country: draft?.country || 'United States',
-      parcelNumber: draft?.parcelNumber || 'LOT-782-B2',
-      siteArea: draft?.siteArea || 7200,
-      siteAreaUnit: (draft?.siteAreaUnit as any) || 'sq ft',
-      frontSetback: draft?.frontSetback !== undefined ? draft.frontSetback : 25,
-      rearSetback: draft?.rearSetback !== undefined ? draft.rearSetback : 10,
-      leftSetback: draft?.leftSetback !== undefined ? draft.leftSetback : 5,
-      rightSetback: draft?.rightSetback !== undefined ? draft.rightSetback : 5,
-      maxBuildingHeight: draft?.maxBuildingHeight || 32,
-      zoningClassification: draft?.zoningClassification || 'SF-3 Single Family Residential',
-      localJurisdiction: draft?.localJurisdiction || 'City of Austin Development Services',
-      latitude: draft?.latitude || '30.2520° N',
-      longitude: draft?.longitude || '97.7490° W',
-      siteOrientation: draft?.siteOrientation || 'South',
-      knownConstraints:
-        draft?.knownConstraints ||
-        'Heritage live oak canopy on northwest quadrant; 4-foot grade drop toward rear boundary.',
-      floodZone: draft?.floodZone || 'Zone X (Minimal Flood Hazard)',
-      hoaRequirements: draft?.hoaRequirements || 'Maximum 32 ft ridge height; neutral exterior earth tone palette.',
+      parcelNumber: draft?.parcelNumber || project.identity.parcelNumber || '',
+      siteArea: draft?.siteArea ?? project.plot.area ?? 0,
+      siteAreaUnit: (draft?.siteAreaUnit as 'sq ft' | 'acres' | 'sq meters') || 'sq ft',
+      frontSetback: draft?.frontSetback ?? project.plot.setbacks.front ?? 0,
+      rearSetback: draft?.rearSetback ?? project.plot.setbacks.rear ?? 0,
+      leftSetback: draft?.leftSetback ?? project.plot.setbacks.left ?? 0,
+      rightSetback: draft?.rightSetback ?? project.plot.setbacks.right ?? 0,
+      maxBuildingHeight: draft?.maxBuildingHeight ?? 0,
+      zoningClassification: draft?.zoningClassification || 'Not verified',
+      localJurisdiction: draft?.localJurisdiction || project.identity.jurisdiction || '',
+      latitude: draft?.latitude || project.identity.latitude || '',
+      longitude: draft?.longitude || project.identity.longitude || '',
+      siteOrientation: draft?.siteOrientation || '',
+      knownConstraints: draft?.knownConstraints || '',
+      floodZone: draft?.floodZone || 'Not verified',
+      hoaRequirements: draft?.hoaRequirements || '',
 
-      numberOfFloors: draft?.numberOfFloors || project.requirements.floors || 2,
-      targetGrossFloorAreaSF: draft?.targetGrossFloorAreaSF || project.requirements.targetBuiltUpArea || 3850,
-      maxBudgetUSD: draft?.maxBudgetUSD || 1050000,
-      preferredStyle: draft?.preferredStyle || 'Contemporary Austin Modern',
-      bedrooms: draft?.bedrooms || project.requirements.bedrooms || 4,
-      bathrooms: draft?.bathrooms || project.requirements.bathrooms || 3.5,
-      targetOccupancy: draft?.targetOccupancy || project.requirements.occupants || 5,
-      garageCapacity: draft?.garageCapacity || project.requirements.parkingSpaces || 2,
-      specialRooms:
-        draft?.specialRooms ||
-        project.requirements.specialPriorities || [
-          'Ground-Floor Guest Suite',
-          'Butler Prep Scullery',
-          'Covered Cedar Lanai',
-          'Upper Family Media Loft',
-          'Dedicated Home Office',
-        ],
+      numberOfFloors: draft?.numberOfFloors ?? project.requirements.floors ?? 0,
+      targetGrossFloorAreaSF: draft?.targetGrossFloorAreaSF ?? project.requirements.targetBuiltUpArea ?? 0,
+      maxBudgetUSD: draft?.maxBudgetUSD ?? 0,
+      preferredStyle: draft?.preferredStyle || project.requirements.preferredStyle || '',
+      bedrooms: draft?.bedrooms ?? project.requirements.bedrooms ?? 0,
+      bathrooms: draft?.bathrooms ?? project.requirements.bathrooms ?? 0,
+      targetOccupancy: draft?.targetOccupancy ?? project.requirements.occupants ?? 0,
+      garageCapacity: draft?.garageCapacity ?? project.requirements.parkingSpaces ?? 0,
+      specialRooms: draft?.specialRooms || project.requirements.requiredRooms || project.requirements.specialPriorities || [],
+      files: draft?.files || project.uploads.map((file) => ({
+        id: file.id,
+        name: file.name,
+        size: file.size,
+        category: file.category || 'Other',
+        uploadStatus: 'Uploaded' as const,
+        fileUrl: file.fileUrl,
+      })),
 
-      files: draft?.files || [
-        {
-          id: 'file-01',
-          name: 'Travis_County_Cadastral_Survey_2025.pdf',
-          size: '3.4 MB',
-          category: 'Survey',
-          uploadStatus: 'Processed',
-          fileUrl: 'https://drive.google.com/mock-vault/survey-austin-01.pdf',
-        },
-        {
-          id: 'file-02',
-          name: 'Austin_Subchapter_F_Zoning_Review.pdf',
-          size: '1.8 MB',
-          category: 'Zoning document',
-          uploadStatus: 'Processed',
-          fileUrl: 'https://drive.google.com/mock-vault/zoning-subchapter-f.pdf',
-        },
-      ],
-
-      architecturalAesthetic:
-        draft?.architecturalAesthetic ||
-        'Warm modernism with native Texas limestone, dark bronze aluminium glazing frames, and natural cedar soffits.',
-      roofStyle: draft?.roofStyle || 'Low-slope standing seam metal roof with 4-ft cantilevered overhangs',
-      sustainabilityTargets: draft?.sustainabilityTargets || [
-        'Passive Solar Orientation (South Glazing)',
-        'Rainwater Cistern Integration',
-        'High-Efficiency Variable Speed Heat Pumps',
-        'EV 240V Level 2 Charger in Garage',
-      ],
-      preferredMaterials: draft?.preferredMaterials || [
-        'Texas White Limestone',
-        'Western Red Cedar Siding',
-        'Thermally Broken Bronze Windows',
-        'Engineered White Oak Flooring',
-      ],
-      indoorOutdoorConnection:
-        draft?.indoorOutdoorConnection ||
-        'Zero-threshold pocketing sliding glass doors opening Great Room to covered cedar lanai and rear courtyard.',
-      smartHomeRequirements:
-        draft?.smartHomeRequirements || 'Central Lutron lighting control, smart HVAC zoning, video intercom.',
-      accessibilityRequirements:
-        draft?.accessibilityRequirements ||
-        'Step-free ground floor entry, 36-inch wide corridors, zero-barrier primary shower.',
-      additionalNotes:
-        draft?.additionalNotes ||
-        'Client plans construction start in Q3 2026 pending Austin Development Services expedited permitting.',
+      architecturalAesthetic: draft?.architecturalAesthetic || '',
+      roofStyle: draft?.roofStyle || '',
+      sustainabilityTargets: draft?.sustainabilityTargets || [],
+      preferredMaterials: draft?.preferredMaterials || [],
+      indoorOutdoorConnection: draft?.indoorOutdoorConnection || '',
+      smartHomeRequirements: draft?.smartHomeRequirements || '',
+      accessibilityRequirements: draft?.accessibilityRequirements || '',
+      additionalNotes: draft?.additionalNotes || project.brief.unresolvedQuestions.join('\n'),
     };
   });
 

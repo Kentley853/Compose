@@ -23,7 +23,12 @@ app.get('/api/health', (req, res) => {
 
 // n8n Webhook Proxy Endpoint to prevent browser CORS issues
 app.post('/api/submit-n8n', async (req, res) => {
-  const webhookUrl = process.env.VITE_N8N_SUBMIT_WEBHOOK_URL || 'https://droppflowwsystems.app.n8n.cloud/webhook/compose-submit';
+  const webhookUrl = process.env.N8N_SUBMIT_WEBHOOK_URL || process.env.VITE_N8N_SUBMIT_WEBHOOK_URL || '';
+  if (!webhookUrl) {
+    return res.status(503).json({
+      error: 'The automation webhook is not configured.',
+    });
+  }
   try {
     const upstreamRes = await fetch(webhookUrl, {
       method: 'POST',

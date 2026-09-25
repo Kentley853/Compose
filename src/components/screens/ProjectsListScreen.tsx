@@ -51,7 +51,7 @@ export const ProjectsListScreen: React.FC = () => {
   // Modals & Action States
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectLocation, setNewProjectLocation] = useState('Austin, Texas');
+  const [newProjectLocation, setNewProjectLocation] = useState('');
   const [newProjectType, setNewProjectType] = useState('Single-family residential');
   const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
 
@@ -105,8 +105,8 @@ export const ProjectsListScreen: React.FC = () => {
       await createNewProject(newProjectName.trim(), newProjectLocation, newProjectType);
       setCreateModalOpen(false);
       setNewProjectName('');
-    } catch (err: any) {
-      addToast('Creation Error', err.message || 'Could not create project.', 'error');
+    } catch {
+      // createNewProject already reports the failure.
     } finally {
       setIsSubmittingCreate(false);
     }
