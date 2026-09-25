@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useProject } from '../../context/ProjectContext';
 import {
   FolderOpen,
@@ -99,7 +100,14 @@ export const Navbar: React.FC<{ onOpenOnboarding?: () => void }> = ({ onOpenOnbo
       {/* Left: Hamburger (Mobile) + Project Selector & Breadcrumb */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {/* Mobile Hamburger Toggle Button */}
+        <Link
+          to="/dashboard"
+          className="hidden sm:inline-flex min-h-10 items-center rounded-lg px-2 text-xs font-semibold text-[#6546F5] hover:bg-[#F4F1FF]"
+        >
+          Home
+        </Link>
         <button
+          type="button"
           onClick={() => setMobileNavOpen(true)}
           className="md:hidden w-10 h-10 min-h-[44px] min-w-[44px] -ml-1 rounded-lg text-[#344054] hover:text-[#172033] hover:bg-[#F9FAFB] flex items-center justify-center transition-colors"
           aria-label="Open Navigation Drawer"

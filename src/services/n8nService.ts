@@ -145,13 +145,9 @@ export interface N8nSubmissionPayload {
   environment: 'production';
 }
 
-const DEFAULT_WEBHOOK_URL = 'https://droppflowwsystems.app.n8n.cloud/webhook/compose-submit';
-
 export const getN8nWebhookUrl = (): string => {
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_N8N_SUBMIT_WEBHOOK_URL) {
-    return import.meta.env.VITE_N8N_SUBMIT_WEBHOOK_URL;
-  }
-  return DEFAULT_WEBHOOK_URL;
+  const configured = import.meta.env.VITE_N8N_SUBMIT_WEBHOOK_URL;
+  return typeof configured === 'string' ? configured.trim() : '';
 };
 
 export const getDraftStorageKey = (projectId: string = 'default'): string => {
@@ -282,7 +278,7 @@ export const submitProjectToN8n = async (
       size: f.size,
       category: f.category,
       uploadStatus: f.uploadStatus,
-      fileUrl: f.fileUrl || `https://drive.google.com/mock-vault/${f.id}`,
+      fileUrl: f.fileUrl || '',
     })),
     generatedOutputs,
     source: 'compose-ai-frontend',
@@ -290,6 +286,9 @@ export const submitProjectToN8n = async (
   };
 
   const webhookUrl = getN8nWebhookUrl();
+  if (!webhookUrl) {
+    throw new Error('The automation webhook is not configured. Add VITE_N8N_SUBMIT_WEBHOOK_URL and try again.');
+  }
 
   // Try proxy endpoint first to bypass any browser CORS restrictions
   try {

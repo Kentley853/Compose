@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ScreenId,
   ProjectData,
@@ -11,7 +12,9 @@ import {
   UploadedFile,
   FileCategory,
 } from '../types/architecture';
-import { INITIAL_JAKARTA_PROJECT, SAMPLE_PROJECTS_LIST } from '../data/sampleProjects';
+import { createBlankProject } from '../data/blankProject';
+import { parseArchitecturalPrompt } from '../lib/promptParse';
+import { getN8nWebhookUrl } from '../services/n8nService';
 import {
   fetchCompanyProjects,
   fetchProjectById,
@@ -23,7 +26,8 @@ import {
   deleteProjectFromSupabase,
   deleteFileFromSupabase,
   ProjectSummary,
-  isSupabaseConfigured,
+  CreateProjectOptions,
+  lastProjectLoadWarning,
 } from '../services/supabase';
 
 export interface ToastMessage {
@@ -121,9 +125,19 @@ interface ProjectContextType {
   project: ProjectData;
   companyProjects: ProjectSummary[];
   isLoadingProjects: boolean;
+  projectsError: string | null;
+  projectReady: boolean;
   loadAllProjects: () => Promise<void>;
   openProjectById: (projectId: string) => Promise<void>;
-  createNewProject: (name?: string, location?: string, projectType?: string) => Promise<void>;
+  createNewProject: (
+    name?: string,
+    location?: string,
+    projectType?: string,
+    options?: CreateProjectOptions,
+  ) => Promise<void>;
+  createProjectFromPrompt: (prompt: string) => Promise<{ aiNote: string }>;
+  retryPromptAutomation: (prompt: string) => Promise<string>;
+  syncScreenFromRoute: (screen: ScreenId) => void;
   renameProject: (projectId: string, newName: string) => Promise<void>;
   archiveProject: (projectId: string, status: 'active' | 'archived') => Promise<void>;
   duplicateProject: (projectId: string) => Promise<void>;
@@ -186,33 +200,70 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 const ACTIVE_PROJECT_ID_STORAGE_KEY = 'compose_ai_active_project_id';
 const LOCAL_STORAGE_KEY_BACKUP = 'compose_ai_active_project_backup_v2';
 
+async function postPromptAutomation(
+  projectId: string,
+  prompt: string,
+  known: string[],
+  reviewFlags: string[],
+): Promise<void> {
+  const webhookUrl = getN8nWebhookUrl();
+  if (!webhookUrl) {
+    throw new Error('The automation webhook is not configured.');
+  }
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 20000);
+  const body = JSON.stringify({
+    source: 'compose-ai-prompt',
+    projectId,
+    prompt,
+    known,
+    reviewFlags,
+    submittedAt: new Date().toISOString(),
+  });
+
+  try {
+    const response = await fetch('/api/submit-n8n', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body,
+      signal: controller.signal,
+    });
+    if (response.ok) {
+      const payload = await response.json().catch(() => null);
+      if (payload && payload.success === false) {
+        throw new Error(payload.error || 'The automation workflow rejected the prompt.');
+      }
+      return;
+    }
+    const direct = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body,
+      signal: controller.signal,
+    });
+    if (!direct.ok) {
+      throw new Error(`The automation workflow returned HTTP ${direct.status}.`);
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('The automation request timed out. You can retry it.');
+    }
+    throw error instanceof Error ? error : new Error('The automation request failed.');
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const navigate = useNavigate();
+  const skipNextAutosave = useRef(true);
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('dashboard');
   const [companyProjects, setCompanyProjects] = useState<ProjectSummary[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState<boolean>(true);
-
-  // Initialize active project from local backup or default
-  const [project, setProject] = useState<ProjectData>(() => {
-    try {
-      const cached = localStorage.getItem(LOCAL_STORAGE_KEY_BACKUP);
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {}
-    return {
-      ...INITIAL_JAKARTA_PROJECT,
-      id: 'proj-company-alpha-01',
-      identity: {
-        ...INITIAL_JAKARTA_PROJECT.identity,
-        id: 'proj-company-alpha-01',
-        name: 'Austin Modern Residence',
-        clientName: 'Client Project Alpha',
-        location: 'Austin, Texas',
-        currentRevision: 'REV-01',
-      },
-      activeRevision: 'REV-01',
-    };
-  });
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectReady, setProjectReady] = useState(false);
+  const [project, setProject] = useState<ProjectData>(() => createBlankProject({ id: 'draft-unpersisted', name: 'No project open' }));
 
   const [deletedUploads, setDeletedUploads] = useState<UploadedFile[]>([]);
   const [activeFloor, setActiveFloor] = useState<1 | 2>(1);
@@ -253,31 +304,27 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // 1. Initial Load: Fetch all saved company projects from Supabase when the app opens
   const loadAllProjects = useCallback(async () => {
     setIsLoadingProjects(true);
+    setProjectsError(null);
     try {
       const list = await fetchCompanyProjects();
       setCompanyProjects(list);
+      if (lastProjectLoadWarning) setProjectsError(lastProjectLoadWarning);
 
-      // Check if user previously opened a specific project
       const lastOpenedId = localStorage.getItem(ACTIVE_PROJECT_ID_STORAGE_KEY);
-      if (lastOpenedId) {
-        const found = list.find((p) => p.id === lastOpenedId);
-        if (found) {
-          const loaded = await fetchProjectById(lastOpenedId);
+      const preferred = list.find((item) => item.id === lastOpenedId) || list[0];
+      if (preferred) {
+        const loaded = await fetchProjectById(preferred.id);
+        if (loaded) {
+          skipNextAutosave.current = true;
           setProject(loaded);
-          localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(loaded));
-          return;
+          setProjectReady(true);
+          localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, loaded.id);
         }
       }
-
-      // If no last-opened or not found, load the top project from Supabase
-      if (list.length > 0) {
-        const loaded = await fetchProjectById(list[0].id);
-        setProject(loaded);
-        localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(loaded));
-        localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, loaded.id);
-      }
-    } catch (err: any) {
-      console.warn('Failed to load company projects:', err);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Could not load projects.';
+      setProjectsError(message);
+      setCompanyProjects([]);
     } finally {
       setIsLoadingProjects(false);
     }
@@ -289,11 +336,10 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Keep active project ID stored in localStorage so refresh stays on this project
   useEffect(() => {
-    if (project?.id) {
-      localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
-      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(project));
-    }
-  }, [project]);
+    if (!projectReady || !project?.id || project.id === 'draft-unpersisted') return;
+    localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
+    localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(project));
+  }, [project, projectReady]);
 
   // 2. Autosave: Automatically save changes after a short delay (1200ms)
   const saveCurrentProjectNow = useCallback(async () => {
@@ -318,12 +364,17 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [project]);
 
   useEffect(() => {
+    if (!projectReady) return;
+    if (skipNextAutosave.current) {
+      skipNextAutosave.current = false;
+      return;
+    }
     const timer = setTimeout(() => {
       saveCurrentProjectNow();
     }, 1200);
 
     return () => clearTimeout(timer);
-  }, [project, saveCurrentProjectNow]);
+  }, [project, projectReady, saveCurrentProjectNow]);
 
   const retryAutosave = () => {
     saveCurrentProjectNow();
@@ -334,11 +385,14 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsLoadingProjects(true);
     try {
       const loaded = await fetchProjectById(projectId);
+      if (!loaded) throw new Error('That project was not found in your account.');
+      skipNextAutosave.current = true;
       setProject(loaded);
+      setProjectReady(true);
       localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, loaded.id);
-      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(loaded));
       setCurrentScreen('dashboard');
-      addToast('Project Opened', `Loaded "${loaded.identity.name}". All fields restored.`, 'success');
+      navigate('/studio/dashboard');
+      addToast('Project Opened', `Loaded "${loaded.identity.name}".`, 'success');
     } catch (err: any) {
       console.error('Failed to open project:', err);
       addToast('Open Failed', err.message || 'Could not load project from Supabase.', 'error');
@@ -354,27 +408,93 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   // Create new project in Supabase
+  const adoptProject = (created: ProjectData, screen: ScreenId = 'setup') => {
+    skipNextAutosave.current = true;
+    setProject(created);
+    setProjectReady(true);
+    localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, created.id);
+    setCurrentScreen(screen);
+    navigate(screen === 'projects' ? '/projects' : `/studio/${screen}`);
+  };
+
   const createNewProject = async (
-    name: string = 'Untitled Architectural Project',
-    location: string = 'Austin, Texas',
-    projectType: string = 'Single-family residential'
+    name: string = 'Untitled architectural project',
+    location: string = '',
+    projectType: string = 'Single-family residential',
+    options?: CreateProjectOptions,
   ) => {
     setIsLoadingProjects(true);
     try {
-      const created = await createNewProjectInSupabase(name, location, projectType);
-      setProject(created);
-      localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, created.id);
-      localStorage.setItem(LOCAL_STORAGE_KEY_BACKUP, JSON.stringify(created));
-      setCurrentScreen('setup');
-      addToast('Project Created', `Initialized "${created.identity.name}".`, 'success');
+      const created = await createNewProjectInSupabase(name, location, projectType, options);
+      adoptProject(created, 'setup');
+      addToast('Project Created', `"${created.identity.name}" is saved to your account.`, 'success');
       await loadAllProjects();
-    } catch (err: any) {
-      console.error('Failed to create project:', err);
-      addToast('Creation Error', err.message || 'Could not create project.', 'error');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Could not create project.';
+      addToast('Creation Error', message, 'error');
+      throw err;
     } finally {
       setIsLoadingProjects(false);
     }
   };
+
+  const rememberProject = (created: ProjectData) => {
+    skipNextAutosave.current = true;
+    setProject(created);
+    setProjectReady(true);
+    localStorage.setItem(ACTIVE_PROJECT_ID_STORAGE_KEY, created.id);
+  };
+
+  const createProjectFromPrompt = async (prompt: string) => {
+    const parsed = parseArchitecturalPrompt(prompt);
+    const created = await createNewProjectInSupabase(parsed.name, parsed.location, parsed.projectType, {
+      description: prompt,
+      sourcePrompt: prompt,
+      city: parsed.city,
+      state: parsed.state,
+      requirements: parsed.requirements,
+      unresolvedQuestions: parsed.reviewFlags,
+    });
+    rememberProject(created);
+    await loadAllProjects();
+
+    if (!getN8nWebhookUrl()) {
+      adoptProject(created, 'setup');
+      return {
+        aiNote: 'AI processing is not configured. The details below were read from your prompt and still need review.',
+      };
+    }
+
+    try {
+      await postPromptAutomation(created.id, prompt, parsed.known, parsed.reviewFlags);
+      adoptProject(created, 'setup');
+      return {
+        aiNote: 'The automation workflow accepted the prompt. Review every extracted value before continuing.',
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'The automation request failed.';
+      throw new Error(`The project was saved, but AI processing failed. ${message}`);
+    }
+  };
+
+  const retryPromptAutomation = async (prompt: string) => {
+    if (!projectReady) throw new Error('Create the project before retrying automation.');
+    const parsed = parseArchitecturalPrompt(prompt);
+    await postPromptAutomation(project.id, prompt, parsed.known, parsed.reviewFlags);
+    return 'The automation workflow accepted the prompt. Review every extracted value before continuing.';
+  };
+
+  const syncScreenFromRoute = useCallback((screen: ScreenId) => {
+    setCurrentScreen(screen);
+  }, []);
+
+  const setScreen = useCallback((screen: ScreenId) => {
+    setCurrentScreen(screen);
+    if (screen === 'projects') navigate('/projects');
+    else if (screen === 'settings') navigate('/settings');
+    else if (screen === 'landing') navigate('/dashboard');
+    else navigate(`/studio/${screen}`);
+  }, [navigate]);
 
   // Rename project in Supabase
   const renameProject = async (projectId: string, newName: string) => {
@@ -426,13 +546,18 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const deleteProject = async (projectId: string) => {
     try {
       await deleteProjectFromSupabase(projectId);
-      addToast('Project Deleted', 'Project removed from company database.', 'info');
-      await loadAllProjects();
-      // If deleted current project, open another
+      addToast('Project Deleted', 'The project was removed from your account.', 'info');
       const remaining = companyProjects.filter((p) => p.id !== projectId);
-      if (remaining.length > 0) {
-        await openProjectById(remaining[0].id);
+      if (project.id === projectId) {
+        if (remaining.length > 0) {
+          await openProjectById(remaining[0].id);
+        } else {
+          setProject(createBlankProject({ id: 'draft-unpersisted', name: 'No project open' }));
+          setProjectReady(false);
+          navigate('/projects');
+        }
       }
+      await loadAllProjects();
     } catch (err: any) {
       addToast('Delete Failed', err.message, 'error');
     }
@@ -633,7 +758,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!presentationMode) {
       setPresentationMode(true);
       setPresentationStep(1);
-      setCurrentScreen('dashboard');
+      setScreen('dashboard');
       addToast('Presentation Mode Activated', 'Investor walkthrough initialized. Step 1 of 10.', 'info');
     } else {
       setPresentationMode(false);
@@ -649,7 +774,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (stepNum >= 1 && stepNum <= PRESENTATION_STEPS.length) {
       setPresentationStep(stepNum);
       const target = PRESENTATION_STEPS[stepNum - 1];
-      setCurrentScreen(target.screenId);
+      setScreen(target.screenId);
     }
   };
 
@@ -669,13 +794,18 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <ProjectContext.Provider
       value={{
         currentScreen,
-        setScreen: setCurrentScreen,
+        setScreen,
         project,
         companyProjects,
         isLoadingProjects,
+        projectsError,
+        projectReady,
         loadAllProjects,
         openProjectById,
         createNewProject,
+        createProjectFromPrompt,
+        retryPromptAutomation,
+        syncScreenFromRoute,
         renameProject,
         archiveProject,
         duplicateProject,

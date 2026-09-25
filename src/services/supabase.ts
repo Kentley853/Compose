@@ -1,6 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { ProjectData, UploadedFile, FileCategory } from '../types/architecture';
+import { ProjectData, UploadedFile, FileCategory, BuildingRequirements } from '../types/architecture';
 import { INITIAL_JAKARTA_PROJECT } from '../data/sampleProjects';
+import { createBlankBrief, createBlankProject, createBlankRequirements, createEmptyScheme } from '../data/blankProject';
+import { friendlyDatabaseError } from '../lib/authErrors';
 
 // Environment variable retrieval (Vite + Vercel / Next.js support)
 const supabaseUrl =
@@ -26,14 +28,37 @@ export const isSupabaseConfigured = (): boolean => {
 };
 
 // Initialize Supabase Client (or local mock client if keys not provided)
+const authStorage = {
+  getItem(key: string) {
+    const remember = localStorage.getItem('compose_auth_remember') !== '0';
+    return (remember ? localStorage : sessionStorage).getItem(key);
+  },
+  setItem(key: string, value: string) {
+    const remember = localStorage.getItem('compose_auth_remember') !== '0';
+    if (remember) {
+      sessionStorage.removeItem(key);
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+      sessionStorage.setItem(key, value);
+    }
+  },
+  removeItem(key: string) {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  },
+};
+
 export const supabase: SupabaseClient = isSupabaseConfigured()
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: authStorage,
       },
     })
-  : createClient('https://mock-company-supabase.supabase.co', 'mock-anon-key', {
+  : createClient('https://example.supabase.co', 'public-anon-key', {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -43,6 +68,7 @@ export const supabase: SupabaseClient = isSupabaseConfigured()
 // Project row representation in Supabase
 export interface SupabaseProjectRow {
   id: string;
+  user_id?: string;
   project_name: string;
   project_code?: string;
   description?: string;
@@ -77,6 +103,7 @@ export interface ProjectSummary {
   active_revision: string;
   created_at: string;
   updated_at: string;
+  schemes: { id: string; name: string; conceptTag: string }[];
 }
 
 export interface SupabaseFileRow {
@@ -96,6 +123,20 @@ export interface SupabaseFileRow {
 // Local storage fallback key for offline resilience
 const LOCAL_COMPANY_PROJECTS_KEY = 'compose_ai_company_projects_cache_v3';
 
+export let lastProjectLoadWarning: string | null = null;
+
+async function requireUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) {
+    throw new Error('Sign in before saving project data.');
+  }
+  return data.user.id;
+}
+
+function cacheKeyFor(userId: string): string {
+  return `${LOCAL_COMPANY_PROJECTS_KEY}:${userId}`;
+}
+
 // -------------------------------------------------------------
 // SERIALIZATION & DESERIALIZATION
 // -------------------------------------------------------------
@@ -114,13 +155,14 @@ export function serializeProjectToRow(project: ProjectData): Omit<SupabaseProjec
     project_stage: 'Schematic design',
     status: 'active',
     client_information: {
-      name: project.identity.clientName || 'Private Client',
-      location: project.identity.location || 'Austin, Texas',
+      name: project.identity.clientName || '',
+      location: project.identity.location || '',
       streetAddress: project.identity.streetAddress || '',
       city: project.identity.city || '',
       state: project.identity.state || '',
       zipCode: project.identity.zipCode || '',
-      leadArchitect: project.identity.leadArchitect || 'Lead Architect',
+      leadArchitect: project.identity.leadArchitect || '',
+      sourcePrompt: project.identity.sourcePrompt || '',
     },
     site_information: {
       plot: project.plot,
@@ -155,7 +197,10 @@ export function serializeProjectToRow(project: ProjectData): Omit<SupabaseProjec
 }
 
 export function deserializeRowToProject(row: SupabaseProjectRow): ProjectData {
-  const base = INITIAL_JAKARTA_PROJECT;
+  const base = createBlankProject({
+    id: row.id,
+    name: row.project_name || 'Untitled architectural project',
+  });
 
   const clientInfo = row.client_information || {};
   const siteInfo = row.site_information || {};
@@ -164,50 +209,46 @@ export function deserializeRowToProject(row: SupabaseProjectRow): ProjectData {
   const designPrefs = row.design_preferences || {};
 
   const restoredAlternatives =
-    floorPlanData.alternatives && floorPlanData.alternatives.length > 0
+    Array.isArray(floorPlanData.alternatives) && floorPlanData.alternatives.length > 0
       ? floorPlanData.alternatives
-      : base.alternatives;
+      : [createEmptyScheme()];
 
   const restoredActiveAltId =
-    floorPlanData.activeAlternativeId ||
-    (restoredAlternatives[0] ? restoredAlternatives[0].id : 'alt-1');
+    floorPlanData.activeAlternativeId || restoredAlternatives[0].id;
 
   return {
     id: row.id,
     identity: {
       ...base.identity,
       id: row.id,
-      name: row.project_name || 'Untitled Project',
-      clientName: clientInfo.name || 'Private Client',
-      location: clientInfo.location || 'Austin, Texas',
+      name: row.project_name || 'Untitled architectural project',
+      clientName: clientInfo.name || '',
+      location: clientInfo.location || '',
       streetAddress: clientInfo.streetAddress || '',
       city: clientInfo.city || '',
       state: clientInfo.state || '',
       zipCode: clientInfo.zipCode || '',
       buildingType: row.project_type || base.identity.buildingType,
-      projectType: row.project_type || base.identity.buildingType,
+      projectType: row.project_type || base.identity.projectType,
       description: row.description || '',
-      leadArchitect: clientInfo.leadArchitect || 'Lead Architect',
+      sourcePrompt: clientInfo.sourcePrompt || '',
+      leadArchitect: clientInfo.leadArchitect || '',
       currentRevision: floorPlanData.activeRevision || 'REV-01',
-      createdDate: row.created_at ? new Date(row.created_at).toLocaleDateString() : 'Today',
-      lastModified: row.updated_at ? new Date(row.updated_at).toLocaleTimeString() : 'Just now',
+      createdDate: row.created_at ? new Date(row.created_at).toLocaleDateString() : base.identity.createdDate,
+      lastModified: row.updated_at ? new Date(row.updated_at).toLocaleTimeString() : base.identity.lastModified,
     },
     plot: siteInfo.plot || base.plot,
     requirements: {
-      ...base.requirements,
+      ...createBlankRequirements(),
       ...bldgReqs,
     },
-    observations: siteInfo.observations || base.observations,
+    observations: Array.isArray(siteInfo.observations) ? siteInfo.observations : base.observations,
     uploads: Array.isArray(floorPlanData.uploads) ? floorPlanData.uploads : [],
-    brief: designPrefs.brief || base.brief,
+    brief: designPrefs.brief || createBlankBrief(),
     alternatives: restoredAlternatives,
     activeAlternativeId: restoredActiveAltId,
-    complianceChecks: Array.isArray(row.compliance_results) && row.compliance_results.length > 0
-      ? row.compliance_results
-      : base.complianceChecks,
-    boqItems: Array.isArray(row.boq_data) && row.boq_data.length > 0
-      ? row.boq_data
-      : base.boqItems,
+    complianceChecks: Array.isArray(row.compliance_results) ? row.compliance_results : [],
+    boqItems: Array.isArray(row.boq_data) ? row.boq_data : [],
     workflow: Array.isArray(floorPlanData.workflow) && floorPlanData.workflow.length > 0
       ? floorPlanData.workflow
       : base.workflow,
@@ -216,8 +257,8 @@ export function deserializeRowToProject(row: SupabaseProjectRow): ProjectData {
       : base.revisions,
     activeRevision: floorPlanData.activeRevision || 'REV-01',
     dependentOutputsOutdated: false,
-    selectedLocation: siteInfo.selectedLocation || 'Austin',
-    locationIndexMultiplier: siteInfo.locationIndexMultiplier || 1.0,
+    selectedLocation: siteInfo.selectedLocation || clientInfo.city || '',
+    locationIndexMultiplier: siteInfo.locationIndexMultiplier || 1,
   };
 }
 
@@ -236,13 +277,20 @@ function toSummary(row: SupabaseProjectRow): ProjectSummary {
     project_type: row.project_type || 'Single-family residential',
     project_stage: row.project_stage || 'Schematic design',
     status: row.status || 'active',
-    location: client.location || 'Austin, Texas',
-    client_name: client.name || 'Private Client',
-    gfa_sf: bldgReq.targetBuiltUpArea || 3850,
-    rooms_count: roomsCount || 10,
+    location: client.location || [client.city, client.state].filter(Boolean).join(', '),
+    client_name: client.name || '',
+    gfa_sf: bldgReq.targetBuiltUpArea || 0,
+    rooms_count: roomsCount,
     active_revision: floorPlan.activeRevision || 'REV-01',
     created_at: row.created_at || new Date().toISOString(),
     updated_at: row.updated_at || new Date().toISOString(),
+    schemes: Array.isArray(floorPlan.alternatives)
+      ? floorPlan.alternatives.map((scheme: { id?: string; name?: string; conceptTag?: string }) => ({
+          id: scheme.id || 'scheme',
+          name: scheme.name || 'Untitled scheme',
+          conceptTag: scheme.conceptTag || '',
+        }))
+      : [],
   };
 }
 
@@ -252,61 +300,68 @@ function toSummary(row: SupabaseProjectRow): ProjectSummary {
 
 // Fetch all company projects from Supabase
 export async function fetchCompanyProjects(): Promise<ProjectSummary[]> {
+  lastProjectLoadWarning = null;
   if (!isSupabaseConfigured()) {
-    return getCachedCompanyProjects();
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
+
+  const userId = await requireUserId();
 
   try {
     const { data, error } = await supabase
       .from('projects')
       .select('*')
+      .eq('user_id', userId)
       .order('updated_at', { ascending: false });
 
     if (error) {
-      console.warn('Supabase projects fetch error, falling back to local cache:', error.message);
-      return getCachedCompanyProjects();
+      lastProjectLoadWarning = friendlyDatabaseError(error.message);
+      const cached = getCachedCompanyProjects(userId);
+      if (cached.length > 0) return cached;
+      throw new Error(lastProjectLoadWarning);
     }
 
-    if (!data || data.length === 0) {
-      // Table is empty, seed initial company project into Supabase
-      const initialProject = getInitialCompanyProject();
-      await saveProjectToSupabase(initialProject);
-      return [toSummary(serializeProjectToRow(initialProject) as any)];
+    const rows = (data || []) as SupabaseProjectRow[];
+    localStorage.setItem(cacheKeyFor(userId), JSON.stringify(rows));
+    return rows.map((row) => toSummary(row));
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Could not load projects.';
+    lastProjectLoadWarning = friendlyDatabaseError(message);
+    const cached = getCachedCompanyProjects(userId);
+    if (cached.length > 0 && !message.includes('not configured') && !message.includes('Sign in')) {
+      return cached;
     }
-
-    const summaries = data.map((row) => toSummary(row as SupabaseProjectRow));
-    // Cache locally for offline resilience
-    localStorage.setItem(LOCAL_COMPANY_PROJECTS_KEY, JSON.stringify(data));
-    return summaries;
-  } catch (err: any) {
-    console.warn('Network error fetching company projects:', err);
-    return getCachedCompanyProjects();
+    throw new Error(lastProjectLoadWarning);
   }
 }
 
 // Fetch single complete project by ID
-export async function fetchProjectById(projectId: string): Promise<ProjectData> {
+export async function fetchProjectById(projectId: string): Promise<ProjectData | null> {
   if (!isSupabaseConfigured()) {
-    const cached = getCachedRowById(projectId);
-    if (cached) return deserializeRowToProject(cached);
-    return getInitialCompanyProject();
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
+
+  const userId = await requireUserId();
 
   try {
     const { data, error } = await supabase
       .from('projects')
       .select('*')
       .eq('id', projectId)
-      .single();
+      .eq('user_id', userId)
+      .maybeSingle();
 
-    if (error || !data) {
-      console.warn(`Could not load project "${projectId}" from Supabase, checking local cache:`, error?.message);
-      const cached = getCachedRowById(projectId);
+    if (error) {
+      const cached = getCachedRowById(projectId, userId);
       if (cached) return deserializeRowToProject(cached);
-      return getInitialCompanyProject();
+      throw new Error(friendlyDatabaseError(error.message));
     }
 
-    // Load file records from project_files table
+    if (!data) {
+      const cached = getCachedRowById(projectId, userId);
+      return cached ? deserializeRowToProject(cached) : null;
+    }
+
     const projectFiles = await fetchProjectFiles(projectId);
     const deserialized = deserializeRowToProject(data as SupabaseProjectRow);
     if (projectFiles.length > 0) {
@@ -314,24 +369,22 @@ export async function fetchProjectById(projectId: string): Promise<ProjectData> 
     }
 
     return deserialized;
-  } catch (err) {
-    console.warn('Error loading project by ID, using local cache:', err);
-    const cached = getCachedRowById(projectId);
+  } catch (err: unknown) {
+    const cached = getCachedRowById(projectId, userId);
     if (cached) return deserializeRowToProject(cached);
-    return getInitialCompanyProject();
+    const message = err instanceof Error ? err.message : 'Could not load this project.';
+    throw new Error(friendlyDatabaseError(message));
   }
 }
 
 // Save or Update a project (Autosave & manual save)
 export async function saveProjectToSupabase(project: ProjectData): Promise<void> {
-  const rowData = serializeProjectToRow(project);
-
-  // Always update local cache first for instant local preservation
-  cacheProjectRow(rowData);
-
   if (!isSupabaseConfigured()) {
-    return;
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
+
+  const userId = await requireUserId();
+  const rowData = serializeProjectToRow(project);
 
   try {
     const { error } = await supabase
@@ -339,49 +392,79 @@ export async function saveProjectToSupabase(project: ProjectData): Promise<void>
       .upsert(
         {
           ...rowData,
+          user_id: userId,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'id' }
       );
 
     if (error) {
-      console.error('Failed to save project to Supabase:', error.message);
-      throw new Error(`Database error: ${error.message}`);
+      throw new Error(friendlyDatabaseError(error.message));
     }
-  } catch (err: any) {
-    console.error('Save project error:', err);
-    throw err;
+    cacheProjectRow(rowData, userId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Could not save this project.';
+    throw new Error(friendlyDatabaseError(message));
   }
 }
 
 // Create a new project in Supabase
+export interface CreateProjectOptions {
+  description?: string;
+  sourcePrompt?: string;
+  city?: string;
+  state?: string;
+  clientName?: string;
+  requirements?: Partial<BuildingRequirements>;
+  unresolvedQuestions?: string[];
+  template?: 'blank' | 'austin-starter';
+}
+
 export async function createNewProjectInSupabase(
   projectName: string,
-  location: string = 'Austin, Texas',
-  projectType: string = 'Single-family residential'
+  location: string = '',
+  projectType: string = 'Single-family residential',
+  options: CreateProjectOptions = {}
 ): Promise<ProjectData> {
   const newId = `proj-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
-  const base = INITIAL_JAKARTA_PROJECT;
+  const [cityFromLocation, stateFromLocation] = location.split(',').map((part) => part.trim());
 
-  const newProject: ProjectData = {
-    ...base,
-    id: newId,
-    identity: {
-      ...base.identity,
+  let newProject: ProjectData;
+  if (options.template === 'austin-starter') {
+    newProject = {
+      ...INITIAL_JAKARTA_PROJECT,
+      id: newId,
+      identity: {
+        ...INITIAL_JAKARTA_PROJECT.identity,
+        id: newId,
+        name: projectName || 'Austin starter template',
+        clientName: '',
+        description:
+          'Starter geometry for learning the workspace. These rooms are an example, not a survey of your site. Replace them before sharing the concept.',
+        sourcePrompt: '',
+        createdDate: new Date().toLocaleDateString(),
+        lastModified: 'Just now',
+        currentRevision: 'REV-01',
+      },
+      activeRevision: 'REV-01',
+      uploads: [],
+      dependentOutputsOutdated: false,
+    };
+  } else {
+    newProject = createBlankProject({
       id: newId,
       name: projectName,
-      clientName: 'New Client',
-      location: location,
-      buildingType: projectType,
-      projectType: projectType,
-      currentRevision: 'REV-01',
-      createdDate: new Date().toLocaleDateString(),
-      lastModified: 'Just now',
-    },
-    activeRevision: 'REV-01',
-    dependentOutputsOutdated: false,
-    uploads: [],
-  };
+      location,
+      city: options.city || cityFromLocation || '',
+      state: options.state || stateFromLocation || '',
+      projectType,
+      description: options.description || '',
+      sourcePrompt: options.sourcePrompt || '',
+      clientName: options.clientName || '',
+      requirements: options.requirements,
+      unresolvedQuestions: options.unresolvedQuestions,
+    });
+  }
 
   await saveProjectToSupabase(newProject);
   return newProject;
@@ -389,23 +472,25 @@ export async function createNewProjectInSupabase(
 
 // Rename a project
 export async function renameProjectInSupabase(projectId: string, newName: string): Promise<void> {
-  // Update local cache
-  const cachedList = getRawCachedList();
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  const userId = await requireUserId();
+  const cachedList = getRawCachedList(userId);
   const match = cachedList.find((p) => p.id === projectId);
   if (match) {
     match.project_name = newName;
     match.updated_at = new Date().toISOString();
-    localStorage.setItem(LOCAL_COMPANY_PROJECTS_KEY, JSON.stringify(cachedList));
+    localStorage.setItem(cacheKeyFor(userId), JSON.stringify(cachedList));
   }
-
-  if (!isSupabaseConfigured()) return;
 
   const { error } = await supabase
     .from('projects')
     .update({ project_name: newName, updated_at: new Date().toISOString() })
-    .eq('id', projectId);
+    .eq('id', projectId)
+    .eq('user_id', userId);
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyDatabaseError(error.message));
 }
 
 // Archive / Unarchive / change status of a project
@@ -413,27 +498,31 @@ export async function setProjectStatusInSupabase(
   projectId: string,
   status: 'active' | 'draft' | 'archived' | 'completed'
 ): Promise<void> {
-  const cachedList = getRawCachedList();
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  const userId = await requireUserId();
+  const cachedList = getRawCachedList(userId);
   const match = cachedList.find((p) => p.id === projectId);
   if (match) {
     match.status = status;
     match.updated_at = new Date().toISOString();
-    localStorage.setItem(LOCAL_COMPANY_PROJECTS_KEY, JSON.stringify(cachedList));
+    localStorage.setItem(cacheKeyFor(userId), JSON.stringify(cachedList));
   }
-
-  if (!isSupabaseConfigured()) return;
 
   const { error } = await supabase
     .from('projects')
     .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', projectId);
+    .eq('id', projectId)
+    .eq('user_id', userId);
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyDatabaseError(error.message));
 }
 
 // Duplicate a project
 export async function duplicateProjectInSupabase(projectId: string): Promise<ProjectData> {
   const sourceProject = await fetchProjectById(projectId);
+  if (!sourceProject) throw new Error('The project to duplicate was not found.');
   const newId = `proj-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
   const duplicateName = `${sourceProject.identity.name} (Copy)`;
 
@@ -467,18 +556,20 @@ export async function duplicateProjectInSupabase(projectId: string): Promise<Pro
 
 // Delete a project permanently after confirmation
 export async function deleteProjectFromSupabase(projectId: string): Promise<void> {
-  // Remove from local cache
-  const cachedList = getRawCachedList().filter((p) => p.id !== projectId);
-  localStorage.setItem(LOCAL_COMPANY_PROJECTS_KEY, JSON.stringify(cachedList));
-
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  const userId = await requireUserId();
+  const cachedList = getRawCachedList(userId).filter((p) => p.id !== projectId);
+  localStorage.setItem(cacheKeyFor(userId), JSON.stringify(cachedList));
 
   const { error } = await supabase
     .from('projects')
     .delete()
-    .eq('id', projectId);
+    .eq('id', projectId)
+    .eq('user_id', userId);
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyDatabaseError(error.message));
 }
 
 // -------------------------------------------------------------
@@ -501,7 +592,8 @@ export async function uploadProjectFileToStorage(
   description: string = ''
 ): Promise<UploadResult> {
   const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const storagePath = `${projectId}/${Date.now()}_${sanitizedName}`;
+  const userId = isSupabaseConfigured() ? await requireUserId() : 'local';
+  const storagePath = `${userId}/${projectId}/${Date.now()}_${sanitizedName}`;
 
   const sizeFormatted =
     file.size > 1024 * 1024
@@ -511,14 +603,7 @@ export async function uploadProjectFileToStorage(
   const fileId = `file-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
   if (!isSupabaseConfigured()) {
-    const objectUrl = URL.createObjectURL(file);
-    return {
-      fileId,
-      storagePath,
-      signedUrl: objectUrl,
-      sizeBytes: file.size,
-      sizeFormatted,
-    };
+    throw new Error('Supabase storage is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
 
   // 1. Upload to Supabase Storage bucket 'project-files'
@@ -547,6 +632,7 @@ export async function uploadProjectFileToStorage(
     await supabase.from('project_files').insert({
       id: fileId,
       project_id: projectId,
+      user_id: userId,
       file_name: file.name,
       file_type: ext || file.type || 'Document',
       file_size: sizeFormatted,
@@ -652,25 +738,28 @@ export async function deleteFileFromSupabase(
 // LOCAL CACHE & INITIALIZATION HELPERS
 // -------------------------------------------------------------
 
-function getRawCachedList(): SupabaseProjectRow[] {
+function getRawCachedList(userId: string): SupabaseProjectRow[] {
   try {
-    const raw = localStorage.getItem(LOCAL_COMPANY_PROJECTS_KEY);
+    const raw = localStorage.getItem(cacheKeyFor(userId));
     if (raw) return JSON.parse(raw);
-  } catch {}
+  } catch {
+    return [];
+  }
   return [];
 }
 
-function getCachedRowById(projectId: string): SupabaseProjectRow | null {
-  const list = getRawCachedList();
+function getCachedRowById(projectId: string, userId: string): SupabaseProjectRow | null {
+  const list = getRawCachedList(userId);
   return list.find((p) => p.id === projectId) || null;
 }
 
-function cacheProjectRow(row: Omit<SupabaseProjectRow, 'created_at' | 'updated_at'>): void {
+function cacheProjectRow(row: Omit<SupabaseProjectRow, 'created_at' | 'updated_at'>, userId: string): void {
   try {
-    const list = getRawCachedList();
+    const list = getRawCachedList(userId);
     const existingIndex = list.findIndex((p) => p.id === row.id);
     const fullRow: SupabaseProjectRow = {
       ...row,
+      user_id: userId,
       created_at: existingIndex >= 0 ? list[existingIndex].created_at : new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -679,34 +768,12 @@ function cacheProjectRow(row: Omit<SupabaseProjectRow, 'created_at' | 'updated_a
     } else {
       list.unshift(fullRow);
     }
-    localStorage.setItem(LOCAL_COMPANY_PROJECTS_KEY, JSON.stringify(list));
+    localStorage.setItem(cacheKeyFor(userId), JSON.stringify(list));
   } catch (e) {
     console.warn('Could not cache project locally:', e);
   }
 }
 
-function getCachedCompanyProjects(): ProjectSummary[] {
-  const list = getRawCachedList();
-  if (list.length > 0) {
-    return list.map((row) => toSummary(row));
-  }
-  const defaultProj = getInitialCompanyProject();
-  return [toSummary(serializeProjectToRow(defaultProj) as any)];
-}
-
-function getInitialCompanyProject(): ProjectData {
-  return {
-    ...INITIAL_JAKARTA_PROJECT,
-    id: 'proj-company-alpha-01',
-    identity: {
-      ...INITIAL_JAKARTA_PROJECT.identity,
-      id: 'proj-company-alpha-01',
-      name: 'Austin Contemporary Residence',
-      clientName: 'Client Project Alpha',
-      location: 'Austin, Texas',
-      currentRevision: 'REV-01',
-      description: 'Two-story passive solar home on 60 ft x 120 ft infill lot with double-height great room and courtyard lanai.',
-    },
-    activeRevision: 'REV-01',
-  };
+function getCachedCompanyProjects(userId: string): ProjectSummary[] {
+  return getRawCachedList(userId).map((row) => toSummary(row));
 }
